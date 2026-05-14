@@ -1,0 +1,24 @@
+# MVP: English manipulative / clickbait-style phrases (curated; compare with research corpora on health misinformation).
+# Lines starting with # are ignored.
+absolutely everyone
+big pharma
+doctors don't want
+doctors hate
+don't tell anyone
+everyone is talking
+government doesn't want
+guaranteed cure
+hidden truth
+miracle cure
+nobody talks about
+official medicine hides
+one hundred percent cure
+one weird trick
+pharma conspiracy
+secret ingredient
+shocking truth
+they don't want you to know
+what doctors hide
+what they won't tell you
+you'll never believe
+you won't believe

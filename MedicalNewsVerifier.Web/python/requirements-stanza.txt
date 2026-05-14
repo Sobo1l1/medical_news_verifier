@@ -1,0 +1,4 @@
+# Опционально: Stanza вместо Natasha (включите MEDNEWS_ENABLE_STANZA=1 и отключите Natasha).
+# Не устанавливайте одновременно с Natasha, если не нужны оба контура.
+# pip install -r requirements.txt -r requirements-stanza.txt
+stanza>=1.7.0

@@ -1,0 +1,69 @@
+# MVP: English evaluative / vague intensifiers (curated; align with stance markers in literature).
+# Lines starting with # are ignored.
+absurd
+appalling
+appropriate
+brilliantly
+clearly
+completely wrong
+commendable
+commendably
+conclusively
+correct
+decent
+definitely
+doubtless
+dreadfully
+entirely false
+evidently
+excellent
+extraordinary
+fairly
+fine
+flawless
+good
+great
+hopelessly
+impeccable
+inappropriate
+inarguably
+incorrect
+lamentable
+lousy
+mediocre
+obviously
+outstanding
+pathetic
+perfectly
+plainly
+poor
+presumably
+probably
+questionable
+remarkable
+ridiculous
+right
+sadly
+satisfactory
+seemingly
+seriously flawed
+shameful
+solid
+somewhat
+sound
+strange
+strongly
+superior
+suspicious
+terribly
+truly
+unacceptable
+undoubtedly
+unquestionably
+utterly
+vague
+very bad
+very good
+weak
+wonderful
+worthless

@@ -1,0 +1,51 @@
+@model IReadOnlyList<MedicalNewsVerifier.Web.Models.AnalysisRecord>
+@{
+    ViewData["Title"] = "История проверок";
+}
+
+<h2 class="mb-3">История последних проверок</h2>
+
+@if (Model.Count == 0)
+{
+    <p class="text-muted">Проверок пока нет.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>Дата (UTC)</th>
+                    <th>Заголовок</th>
+                    <th>Оценка</th>
+                    <th>Статус</th>
+                    <th>Фрагменты</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in Model)
+                {
+                    <tr>
+                        <td>@item.CreatedAtUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>@item.Headline</td>
+                        <td>@item.ReliabilityScore/100</td>
+                        <td>@item.Status</td>
+                        <td>@item.SuspiciousFragments.Count</td>
+                        <td>
+                            <a class="btn btn-sm btn-outline-primary me-1" asp-controller="Home" asp-action="Details" asp-route-id="@item.Id">Открыть</a>
+                            <form asp-action="Delete" method="post" class="d-inline">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="id" value="@item.Id" />
+                                <button type="submit" class="btn btn-sm btn-outline-danger"
+                                        onclick="return confirm('Удалить проверку из истории?');">
+                                    Удалить
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

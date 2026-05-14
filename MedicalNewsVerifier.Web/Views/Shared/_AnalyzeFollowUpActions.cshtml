@@ -1,0 +1,18 @@
+@model bool
+
+<div class="row mt-2 mb-2">
+    <div class="col-lg-10">
+        <div class="card card-body border py-3 shadow-sm">
+            <div class="fw-semibold mb-2">Дальнейшие действия</div>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <button type="submit" form="newsAnalyzeForm" class="btn btn-primary" name="forceNew" value="false">Запустить анализ</button>
+                <button type="submit" form="newsAnalyzeForm" class="btn btn-outline-primary" name="forceNew" value="true">Снова*</button>
+                <a class="btn btn-outline-secondary" asp-controller="Home" asp-action="Index">Новая проверка</a>
+            </div>
+            @if (Model)
+            {
+                <p class="form-text mb-0 mt-2">* Новая запись в истории, даже если текст совпадает с уже сохранённой проверкой.</p>
+            }
+        </div>
+    </div>
+</div>

@@ -1,0 +1,211 @@
+﻿@model MedicalNewsVerifier.Web.ViewModels.AnalyzeResultViewModel
+@{
+    ViewData["Title"] = "Проверка новости";
+}
+
+<div class="row">
+    <div class="col-lg-10">
+        <h2 class="mb-3">Первичная проверка достоверности медицинской новости</h2>
+        <div class="alert alert-secondary">
+            Анализ учитывает лексические, пунктуационные и структурные признаки:
+            эмоциональность, манипулятивные выражения, оценочную лексику, верхний регистр, «!» и «?»,
+            числа, даты (в том числе словесные), ссылки и отсылки к источнику.
+        </div>
+        @if (Model.LastAnalysis is not null)
+        {
+            <partial name="_AnalyzeFollowUpActions" model="false" />
+        }
+        <form id="newsAnalyzeForm" asp-action="Analyze" method="post" class="card card-body shadow-sm">
+            <div class="mb-3">
+                <label asp-for="Input.Headline" class="form-label"></label>
+                <input asp-for="Input.Headline" class="form-control" />
+                <span asp-validation-for="Input.Headline" class="text-danger"></span>
+            </div>
+            <div class="mb-3">
+                <label asp-for="Input.NewsText" class="form-label"></label>
+                <textarea asp-for="Input.NewsText" class="form-control" rows="8" maxlength="15000"></textarea>
+                <span asp-validation-for="Input.NewsText" class="text-danger"></span>
+            </div>
+            <div class="mb-3">
+                <label asp-for="Input.SourceUrl" class="form-label"></label>
+                <input asp-for="Input.SourceUrl" class="form-control" />
+                <span asp-validation-for="Input.SourceUrl" class="text-danger"></span>
+            </div>
+            @if (Model.LastAnalysis is null)
+            {
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <button type="submit" class="btn btn-primary" name="forceNew" value="false">Запустить анализ</button>
+                </div>
+            }
+        </form>
+    </div>
+</div>
+
+@if (Model.LastAnalysis is not null)
+{
+    var scoreClass = Model.LastAnalysis.ReliabilityScore >= 70
+        ? "score-good"
+        : Model.LastAnalysis.ReliabilityScore <= 40 ? "score-bad" : "score-mid";
+
+    var featureGroups = FeatureInsightGrouping.BuildGroups(Model.LastAnalysis.SuspiciousFragments);
+    var explanationLines = Model.LastAnalysis.Explanation
+        .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .ToList();
+
+    <div class="row mt-4">
+        <div class="col-lg-10">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h4 class="mb-3">Результат анализа</h4>
+                    @if (Model.OpenedFromHistory)
+                    {
+                        <div class="alert alert-info py-2">
+                            Просмотр сохранённой проверки из истории: оценка, разметка и расшифровка признаков восстановлены из базы данных.
+                        </div>
+                    }
+                    else if (Model.IsFromHistory)
+                    {
+                        <div class="alert alert-info py-2">
+                            Совпадающая проверка уже выполнялась ранее. Показан сохранённый результат и разметка из истории.
+                        </div>
+                    }
+                    <div class="d-flex flex-wrap align-items-baseline gap-2 mb-2">
+                        <span class="text-muted">Оценка достоверности</span>
+                        <span class="@scoreClass fs-4">@Model.LastAnalysis.ReliabilityScore/100</span>
+                    </div>
+                    <div class="mb-3">
+                        <div class="fw-semibold">Статус</div>
+                        <div>@VerificationStatusRussian.Title(Model.LastAnalysis.Status)</div>
+                        <div class="small text-muted mt-1">@VerificationStatusRussian.Hint(Model.LastAnalysis.Status)</div>
+                    </div>
+                    <div class="mb-0">
+                        <div class="fw-semibold mb-2">Сводка автоматического анализа</div>
+                        @if (explanationLines.Count == 0)
+                        {
+                            <p class="text-muted small mb-0">Пояснение отсутствует.</p>
+                        }
+                        else
+                        {
+                            <ul class="list-unstyled analysis-summary border rounded-3 overflow-hidden mb-0">
+                                @foreach (var line in explanationLines)
+                                {
+                                    <li class="d-flex gap-3 px-3 py-2 border-bottom border-light small">
+                                        <span class="text-secondary flex-shrink-0">—</span>
+                                        <span class="text-break">@line</span>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-3">
+        <div class="col-lg-10">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5 class="mb-2">Разметка текста</h5>
+                    <p class="small text-muted mb-2">
+                        Заголовок выделен жирным; ниже — текст новости. Наведите указатель на блок признака справа —
+                        подсветятся и текст, и сам блок.
+                    </p>
+                    <div class="markup-legend small mb-3 d-flex flex-wrap gap-3 align-items-center">
+                        <span class="text-muted me-1">Легенда:</span>
+                        @foreach (var sw in FeatureKindMetadata.LegendSwatches())
+                        {
+                            <span class="d-inline-flex align-items-center gap-1">
+                                <span class="markup-legend-swatch marker-kind-@sw.CssToken" title="@sw.Label"></span>
+                                <span>@sw.Label</span>
+                            </span>
+                        }
+                    </div>
+                    <div class="row g-3" data-analysis-markup>
+                        <div class="col-lg-7">
+                            <div class="text-markup-host" aria-label="Текст с подсветкой признаков">
+                                @Html.Raw(Model.HighlightedHtml ?? string.Empty)
+                            </div>
+                        </div>
+                        <div class="col-lg-5">
+                            @if (featureGroups.Count == 0)
+                            {
+                                <p class="text-muted mb-0">Записей разметки с типом признака нет (возможна старая запись до обновления схемы).</p>
+                            }
+                            else
+                            {
+                                @foreach (var g in featureGroups)
+                                {
+                                    var kinds = string.Join(",", g.KindValues);
+                                    var samples = g.Fragments
+                                        .Select(f => f.FragmentText)
+                                        .Where(t => !string.IsNullOrWhiteSpace(t))
+                                        .Distinct()
+                                        .Take(4)
+                                        .ToList();
+                                    <div class="feature-hint border rounded p-2 mb-2" data-feature-hints="@kinds">
+                                        <div class="fw-semibold">@g.Title</div>
+                                        <div class="small text-muted mt-1">@g.Description</div>
+                                        <div class="small mt-2">
+                                            <span class="text-muted">Найдено вхождений:</span> <strong>@g.Fragments.Count</strong>
+                                        </div>
+                                        @if (samples.Count > 0)
+                                        {
+                                            <div class="small mt-1 text-break">
+                                                <span class="text-muted">Примеры:</span>
+                                                @string.Join(" · ", samples.Select(s => s.Length > 80 ? s[..77] + "…" : s))
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-3">
+        <div class="col-lg-10">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5>Релевантные официальные публикации</h5>
+                    @if (Model.OfficialMatches.Count == 0)
+                    {
+                        <p class="text-muted mb-0">Совпадения с официальными источниками не найдены.</p>
+                    }
+                    else
+                    {
+                        <ul class="list-group">
+                            @foreach (var source in Model.OfficialMatches)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <div><strong>@source.SourceName</strong>: @source.Title</div>
+                                        <a href="@source.Url" target="_blank" rel="noopener">@source.Url</a>
+                                    </div>
+                                    <span class="badge bg-secondary">релевантность @source.RelevanceScore%</span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-3">
+        <div class="col-lg-10">
+            <partial name="_AnalyzeFollowUpActions" model="true" />
+        </div>
+    </div>
+}
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    @if (Model.LastAnalysis is not null)
+    {
+        <script src="~/js/analysis-markup.js" asp-append-version="true"></script>
+    }
+}

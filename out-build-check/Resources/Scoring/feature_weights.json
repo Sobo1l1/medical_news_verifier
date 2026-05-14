@@ -1,0 +1,16 @@
+{
+  "baseScore": 55,
+  "emotionalDensityPenalty": 22,
+  "manipulativeDensityPenalty": 30,
+  "evaluativeDensityPenalty": 10,
+  "uppercaseRatioPenalty": 20,
+  "exclamationPenalty": 2,
+  "questionPenalty": 1,
+  "hasLinksBonus": 2,
+  "hasDatesBonus": 2,
+  "hasNumbersBonus": 2,
+  "hasSourceCueBonus": 3,
+  "russianDateExtraBonusPerHit": 1,
+  "pythonPenaltyCap": 35,
+  "sourcesBonusCap": 35
+}

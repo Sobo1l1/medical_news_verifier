@@ -1,0 +1,4 @@
+Сторонние и автогенерируемые списки:
+- emotional_ru_rusentilex.txt — см. ../docs/lexicon_sources.md (источник: seed и/или RuSentiLex-совместимый дамп).
+
+Базовые файлы emotional_ru.txt / emotional_en.txt — учебные подборки проекта.

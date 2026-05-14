@@ -1,0 +1,120 @@
+html {
+  font-size: 14px;
+}
+
+@media (min-width: 768px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
+  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+}
+
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+  margin-bottom: 60px;
+}
+
+.score-good {
+  color: #157347;
+  font-weight: 700;
+}
+
+.score-mid {
+  color: #946200;
+  font-weight: 700;
+}
+
+.score-bad {
+  color: #b02a37;
+  font-weight: 700;
+}
+
+.text-markup-host {
+  font-family: inherit;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid #dee2e6;
+  border-radius: 0.375rem;
+  padding: 0.75rem 1rem;
+  background-color: #f8f9fa;
+}
+
+.text-marker {
+  border-radius: 0.2rem;
+  padding: 0 0.08em;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.text-marker.is-kind-hover {
+  box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.35);
+}
+
+.marker-kind-emotional { background-color: rgba(220, 53, 69, 0.22); }
+.marker-kind-manipulative { background-color: rgba(111, 66, 193, 0.22); }
+.marker-kind-evaluative { background-color: rgba(253, 126, 20, 0.22); }
+.marker-kind-uppercase { background-color: rgba(214, 51, 132, 0.2); }
+.marker-kind-exclamation { background-color: rgba(255, 193, 7, 0.28); }
+.marker-kind-question { background-color: rgba(13, 202, 240, 0.22); }
+.markup-headline {
+  margin-bottom: 0;
+}
+
+.markup-body-gap {
+  height: 0.9rem;
+}
+
+.markup-body {
+  margin-top: 0;
+}
+
+.marker-kind-link { background-color: rgba(25, 135, 84, 0.18); }
+.marker-kind-date { background-color: rgba(32, 201, 151, 0.18); }
+.marker-kind-number { background-color: rgba(108, 117, 125, 0.2); }
+.marker-kind-source { background-color: rgba(13, 110, 253, 0.16); }
+.marker-kind-python { background-color: rgba(108, 117, 125, 0.26); }
+.marker-kind-none { background-color: rgba(173, 181, 189, 0.2); }
+
+.feature-hint {
+  cursor: default;
+  border-radius: 0.35rem;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.feature-hint:hover {
+  background-color: rgba(13, 110, 253, 0.05);
+}
+
+.feature-hint.is-row-hover {
+  background-color: rgba(13, 110, 253, 0.08);
+  box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.22);
+}
+
+.markup-legend-swatch {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 0.2rem;
+  vertical-align: middle;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.analysis-summary li:last-child {
+  border-bottom: 0 !important;
+}
+
+.form-floating > .form-control-plaintext::placeholder, .form-floating > .form-control::placeholder {
+  color: var(--bs-secondary-color);
+  text-align: end;
+}
+
+.form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
+  text-align: start;
+}
