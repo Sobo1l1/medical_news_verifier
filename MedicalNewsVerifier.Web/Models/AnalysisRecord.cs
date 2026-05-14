@@ -15,7 +15,17 @@ public class AnalysisRecord
     [MaxLength(500)]
     public string? SourceUrl { get; set; }
 
+    /// <summary>Итоговая (комбинированная) оценка 0–100, по ней же вычисляется <see cref="Status"/>.</summary>
     public int ReliabilityScore { get; set; }
+
+    /// <summary>Оценка эвристики (лексика, Python, совпадения с корпусом).</summary>
+    public int HeuristicReliabilityScore { get; set; }
+
+    /// <summary>Согласованность с доверенными выдержками по мнению локальной LLM; null если анализ не выполнялся или сбой.</summary>
+    public int? LlmAlignmentScore { get; set; }
+
+    [MaxLength(4000)]
+    public string? LlmSummary { get; set; }
 
     public VerificationStatus Status { get; set; }
 

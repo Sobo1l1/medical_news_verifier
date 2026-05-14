@@ -1,0 +1,77 @@
+@model MedicalNewsVerifier.Web.ViewModels.SourcesPageViewModel
+@{
+    ViewData["Title"] = "Доверенные источники";
+}
+
+<div class="row">
+    <div class="col-lg-10">
+        <h2 class="mb-3">Справочник доверенных источников</h2>
+        <p class="text-muted small">
+            Каталог URL для библиографии и ориентира. Сопоставление новости с текстами выполняется по записям в разделе
+            <a asp-controller="Corpus" asp-action="Index">корпус материалов</a>.
+        </p>
+        @if (TempData["Message"] is string msg)
+        {
+            <div class="alert alert-success py-2">@msg</div>
+        }
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-header">Добавить источник</div>
+            <div class="card-body">
+                <form asp-action="Add" method="post">
+                    <div asp-validation-summary="ModelOnly" class="text-danger small"></div>
+                    <div class="mb-2">
+                        <label asp-for="Input.Name" class="form-label"></label>
+                        <input asp-for="Input.Name" class="form-control" />
+                        <span asp-validation-for="Input.Name" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Input.BaseUrl" class="form-label"></label>
+                        <input asp-for="Input.BaseUrl" class="form-control" />
+                        <span asp-validation-for="Input.BaseUrl" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Input.AccessedOnUtc" class="form-label"></label>
+                        <input asp-for="Input.AccessedOnUtc" class="form-control" />
+                        <span asp-validation-for="Input.AccessedOnUtc" class="text-danger small"></span>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input asp-for="Input.IsEnabled" class="form-check-input" />
+                        <label asp-for="Input.IsEnabled" class="form-check-label"></label>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">Сохранить</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle">
+                <thead>
+                    <tr>
+                        <th>Порядок</th>
+                        <th>Название</th>
+                        <th>URL</th>
+                        <th>Дата обращения</th>
+                        <th>Вкл.</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in Model.Items)
+                    {
+                        <tr>
+                            <td>@s.SortOrder</td>
+                            <td>@s.Name</td>
+                            <td><a href="@s.BaseUrl" target="_blank" rel="noopener">@s.BaseUrl</a></td>
+                            <td>@(s.AccessedOnUtc?.ToString("yyyy-MM-dd") ?? "—")</td>
+                            <td>@(s.IsEnabled ? "да" : "нет")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

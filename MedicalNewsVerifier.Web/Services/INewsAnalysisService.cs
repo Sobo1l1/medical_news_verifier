@@ -13,4 +13,7 @@ public interface INewsAnalysisService
     Task<AnalysisRecord?> GetAnalysisByIdAsync(int id, CancellationToken cancellationToken);
 
     Task<List<OfficialPublicationMatchVm>> GetOfficialMatchesAsync(string newsText, CancellationToken cancellationToken);
+
+    /// <summary>Фоновый анализ с обновлением <see cref="IAnalysisJobStore"/> по ходу этапов.</summary>
+    Task RunAnalysisJobAsync(Guid jobId, AnalyzeNewsInputModel input, CancellationToken cancellationToken);
 }

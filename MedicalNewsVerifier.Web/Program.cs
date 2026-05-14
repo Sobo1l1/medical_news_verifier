@@ -1,12 +1,29 @@
 using MedicalNewsVerifier.Web.Data;
 using MedicalNewsVerifier.Web.Services;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllersWithViews();
+builder.Services.AddControllersWithViews()
+    .AddJsonOptions(o =>
+    {
+        o.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    });
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<IAnalysisJobStore, AnalysisJobStore>();
+builder.Services.Configure<OllamaOptions>(builder.Configuration.GetSection("Ollama"));
+builder.Services.AddHttpClient<IOllamaComparisonClient, OllamaComparisonClient>((sp, http) =>
+{
+    var opt = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<OllamaOptions>>().Value;
+    var baseUrl = string.IsNullOrWhiteSpace(opt.BaseUrl)
+        ? "http://localhost:11434/v1/"
+        : opt.BaseUrl.TrimEnd('/') + "/";
+    http.BaseAddress = new Uri(baseUrl);
+    http.Timeout = TimeSpan.FromSeconds(Math.Max(30, opt.TimeoutSeconds));
+});
 builder.Services.AddScoped<IPythonLinguisticClient, PythonLinguisticClient>();
 builder.Services.AddHttpClient<IOfficialSourceFetcher, OfficialSourceFetcher>();
 builder.Services.AddScoped<INewsAnalysisService, NewsAnalysisService>();
@@ -27,6 +44,8 @@ app.UseRouting();
 app.UseAuthorization();
 
 app.MapStaticAssets();
+
+app.MapControllers();
 
 app.MapControllerRoute(
     name: "default",

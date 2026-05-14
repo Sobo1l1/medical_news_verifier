@@ -11,6 +11,59 @@ public static class DatabaseSchemaPatcher
     {
         ApplySuspiciousFragmentMarkupColumns(db);
         ApplyAnalysisRecordNewsTextLength(db);
+        ApplyTrustedSourcesTable(db);
+        ApplyAnalysisRecordLlmColumns(db);
+    }
+
+    public static void ApplyTrustedSourcesTable(AppDbContext db)
+    {
+        if (db.Database.ProviderName is null ||
+            !db.Database.ProviderName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            db.Database.ExecuteSqlRaw(
+                """
+                CREATE TABLE IF NOT EXISTS "TrustedSources" (
+                    "Id" serial PRIMARY KEY,
+                    "Name" character varying(300) NOT NULL,
+                    "BaseUrl" character varying(600) NOT NULL,
+                    "AccessedOnUtc" timestamp with time zone NULL,
+                    "IsEnabled" boolean NOT NULL DEFAULT TRUE,
+                    "SortOrder" integer NOT NULL DEFAULT 0
+                );
+                """);
+        }
+        catch
+        {
+            // Игнорируем при отсутствии прав или нестандартной схеме.
+        }
+    }
+
+    public static void ApplyAnalysisRecordLlmColumns(AppDbContext db)
+    {
+        if (db.Database.ProviderName is null ||
+            !db.Database.ProviderName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            db.Database.ExecuteSqlRaw(
+                """ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "HeuristicReliabilityScore" integer NOT NULL DEFAULT 0;""");
+            db.Database.ExecuteSqlRaw(
+                """ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "LlmAlignmentScore" integer NULL;""");
+            db.Database.ExecuteSqlRaw(
+                """ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "LlmSummary" character varying(4000) NULL;""");
+        }
+        catch
+        {
+            // Таблица ещё не создана или колонки уже есть с другим типом — пропускаем.
+        }
     }
 
     public static void ApplySuspiciousFragmentMarkupColumns(AppDbContext db)

@@ -7,9 +7,38 @@
     <div class="col-lg-10">
         <h2 class="mb-3">Первичная проверка достоверности медицинской новости</h2>
         <div class="alert alert-secondary">
-            Анализ учитывает лексические, пунктуационные и структурные признаки:
-            эмоциональность, манипулятивные выражения, оценочную лексику, верхний регистр, «!» и «?»,
-            числа, даты (в том числе словесные), ссылки и отсылки к источнику.
+            Анализ учитывает лексические, пунктуационные и структурные признаки (C#), дополнительный модуль Python,
+            совпадения с корпусом доверенных материалов и параллельно — сравнение с тем же корпусом через локальную модель
+            <strong>Ollama</strong> (если включена в конфигурации). Ход анализа отображается ниже по мере готовности этапов.
+        </div>
+        <div id="analysisProgressHost" class="card border-primary mb-3 shadow-sm d-none" aria-live="polite">
+            <div class="card-body py-3">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>
+                    <strong id="analysisProgressTitle">Анализ выполняется…</strong>
+                </div>
+                <p class="small text-muted mb-2" id="analysisProgressMessage">Подготовка…</p>
+                <div class="row g-2 small">
+                    <div class="col-md-4">
+                        <div class="border rounded p-2 bg-light">
+                            <div class="text-muted">Эвристика</div>
+                            <div id="analysisHeuristicScore" class="fs-5">—</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="border rounded p-2 bg-light">
+                            <div class="text-muted">Ollama (LLM)</div>
+                            <div id="analysisLlmScore" class="fs-5">—</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="border rounded p-2 bg-light">
+                            <div class="text-muted">Итог</div>
+                            <div id="analysisCombinedScore" class="fs-5">—</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         @if (Model.LastAnalysis is not null)
         {
@@ -34,7 +63,7 @@
             @if (Model.LastAnalysis is null)
             {
                 <div class="d-flex flex-wrap gap-2 align-items-center">
-                    <button type="submit" class="btn btn-primary" name="forceNew" value="false">Запустить анализ</button>
+                    <button type="submit" id="newsAnalyzeSubmit" class="btn btn-primary" name="forceNew" value="false">Запустить анализ</button>
                 </div>
             }
         </form>
@@ -70,9 +99,41 @@
                         </div>
                     }
                     <div class="d-flex flex-wrap align-items-baseline gap-2 mb-2">
-                        <span class="text-muted">Оценка достоверности</span>
+                        <span class="text-muted">Итоговая оценка</span>
                         <span class="@scoreClass fs-4">@Model.LastAnalysis.ReliabilityScore/100</span>
                     </div>
+                    <div class="row g-2 small mb-3">
+                        @{
+                            var heuristicShown = string.IsNullOrEmpty(Model.LastAnalysis.LlmSummary) && Model.LastAnalysis.HeuristicReliabilityScore == 0
+                                ? Model.LastAnalysis.ReliabilityScore
+                                : Model.LastAnalysis.HeuristicReliabilityScore;
+                        }
+                        <div class="col-sm-4">
+                            <div class="border rounded p-2">
+                                <div class="text-muted">Эвристика</div>
+                                <div class="fw-semibold">@heuristicShown/100</div>
+                            </div>
+                        </div>
+                        <div class="col-sm-4">
+                            <div class="border rounded p-2">
+                                <div class="text-muted">Ollama</div>
+                                <div class="fw-semibold">@(Model.LastAnalysis.LlmAlignmentScore.HasValue ? $"{Model.LastAnalysis.LlmAlignmentScore}/100" : "—")</div>
+                            </div>
+                        </div>
+                        <div class="col-sm-4">
+                            <div class="border rounded p-2">
+                                <div class="text-muted">Итог</div>
+                                <div class="fw-semibold">@Model.LastAnalysis.ReliabilityScore/100</div>
+                            </div>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(Model.LastAnalysis.LlmSummary))
+                    {
+                        <div class="alert alert-light border small mb-3">
+                            <div class="fw-semibold mb-1">Краткое резюме модели (Ollama)</div>
+                            <div class="text-break">@Model.LastAnalysis.LlmSummary</div>
+                        </div>
+                    }
                     <div class="mb-3">
                         <div class="fw-semibold">Статус</div>
                         <div>@VerificationStatusRussian.Title(Model.LastAnalysis.Status)</div>
@@ -207,5 +268,80 @@
     @if (Model.LastAnalysis is not null)
     {
         <script src="~/js/analysis-markup.js" asp-append-version="true"></script>
+    }
+    else
+    {
+        <script>
+            (function () {
+                const form = document.getElementById('newsAnalyzeForm');
+                const host = document.getElementById('analysisProgressHost');
+                const msg = document.getElementById('analysisProgressMessage');
+                const hScore = document.getElementById('analysisHeuristicScore');
+                const lScore = document.getElementById('analysisLlmScore');
+                const cScore = document.getElementById('analysisCombinedScore');
+                if (!form || !host) return;
+
+                form.addEventListener('submit', async function (e) {
+                    e.preventDefault();
+                    if (!form.checkValidity()) {
+                        form.reportValidity();
+                        return;
+                    }
+
+                    host.classList.remove('d-none');
+                    msg.textContent = 'Отправка запроса…';
+                    hScore.textContent = '…';
+                    lScore.textContent = '…';
+                    cScore.textContent = '…';
+
+                    const payload = {
+                        headline: document.querySelector('[name="Input.Headline"]')?.value ?? '',
+                        newsText: document.querySelector('[name="Input.NewsText"]')?.value ?? '',
+                        sourceUrl: document.querySelector('[name="Input.SourceUrl"]')?.value ?? ''
+                    };
+
+                    const startResp = await fetch('/api/analysis/start', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!startResp.ok) {
+                        msg.textContent = 'Не удалось запустить анализ (проверьте поля и язык текста).';
+                        return;
+                    }
+
+                    const startJson = await startResp.json();
+                    const jobId = startJson.jobId;
+                    msg.textContent = 'Анализ запущен, ожидайте этапы…';
+
+                    const timer = setInterval(async () => {
+                        const st = await fetch('/api/analysis/' + jobId + '/status');
+                        if (!st.ok) {
+                            clearInterval(timer);
+                            msg.textContent = 'Статус анализа недоступен.';
+                            return;
+                        }
+                        const s = await st.json();
+                        if (s.message) msg.textContent = s.message;
+                        if (typeof s.heuristicScore === 'number') hScore.textContent = s.heuristicScore + '/100';
+                        if (typeof s.llmScore === 'number') lScore.textContent = s.llmScore + '/100';
+                        else if (s.phase === 'Completed' && s.llmScore === null) lScore.textContent = '—';
+                        if (typeof s.combinedScore === 'number') cScore.textContent = s.combinedScore + '/100';
+
+                        if (s.phase === 'Completed') {
+                            clearInterval(timer);
+                            if (s.recordId) {
+                                window.location.href = '/Home/Details/' + s.recordId;
+                            }
+                        }
+                        if (s.phase === 'Failed') {
+                            clearInterval(timer);
+                            msg.textContent = 'Ошибка: ' + (s.error || 'неизвестно');
+                        }
+                    }, 450);
+                });
+            })();
+        </script>
     }
 }

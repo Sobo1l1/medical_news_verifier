@@ -1,0 +1,69 @@
+@model MedicalNewsVerifier.Web.ViewModels.CorpusPageViewModel
+@{
+    ViewData["Title"] = "Корпус материалов";
+}
+
+<div class="row">
+    <div class="col-lg-10">
+        <h2 class="mb-3">Корпус для сопоставления</h2>
+        <p class="text-muted small">
+            Если официальные сайты недоступны, приложение использует эти тексты для оценки пересечений по ключевым словам
+            и как контекст для локальной модели (Ollama). В продакшене этот раздел нужно защитить авторизацией.
+        </p>
+        @if (TempData["Message"] is string msg)
+        {
+            <div class="alert alert-success py-2">@msg</div>
+        }
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-header">Добавить материал вручную</div>
+            <div class="card-body">
+                <form asp-action="Add" method="post">
+                    <div asp-validation-summary="ModelOnly" class="text-danger small"></div>
+                    <div class="mb-2">
+                        <label asp-for="Input.SourceName" class="form-label"></label>
+                        <input asp-for="Input.SourceName" class="form-control" />
+                        <span asp-validation-for="Input.SourceName" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Input.Title" class="form-label"></label>
+                        <input asp-for="Input.Title" class="form-control" />
+                        <span asp-validation-for="Input.Title" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Input.Url" class="form-label"></label>
+                        <input asp-for="Input.Url" class="form-control" />
+                        <span asp-validation-for="Input.Url" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Input.Content" class="form-label"></label>
+                        <textarea asp-for="Input.Content" class="form-control" rows="6"></textarea>
+                        <span asp-validation-for="Input.Content" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Input.PublishedAtUtc" class="form-label"></label>
+                        <input asp-for="Input.PublishedAtUtc" class="form-control" />
+                        <span asp-validation-for="Input.PublishedAtUtc" class="text-danger small"></span>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">Сохранить</button>
+                </form>
+            </div>
+        </div>
+
+        <h5 class="mb-2">Последние записи</h5>
+        <ul class="list-group">
+            @foreach (var p in Model.Items)
+            {
+                <li class="list-group-item">
+                    <div><strong>@p.SourceName</strong> — @p.Title</div>
+                    <div class="small"><a href="@p.Url" target="_blank" rel="noopener">@p.Url</a></div>
+                    <div class="small text-muted mt-1">@p.PublishedAtUtc.ToString("u") · @(p.Content.Length) симв.</div>
+                </li>
+            }
+        </ul>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

@@ -8,6 +8,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AnalysisRecord> AnalysisRecords => Set<AnalysisRecord>();
     public DbSet<SuspiciousFragment> SuspiciousFragments => Set<SuspiciousFragment>();
     public DbSet<OfficialPublication> OfficialPublications => Set<OfficialPublication>();
+    public DbSet<TrustedSource> TrustedSources => Set<TrustedSource>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
