@@ -14,12 +14,28 @@ public class AnalyzeNewsInputModel : IValidatableObject
     [Display(Name = "Текст новости", Description = "До 15 000 символов; длинный материал можно разделить на несколько проверок. На русском языке.")]
     public string NewsText { get; set; } = string.Empty;
 
-    [Url(ErrorMessage = "Некорректный URL")]
     [Display(Name = "Ссылка на публикацию")]
     public string? SourceUrl { get; set; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        if (string.IsNullOrWhiteSpace(SourceUrl))
+        {
+            SourceUrl = null;
+        }
+        else
+        {
+            SourceUrl = SourceUrl.Trim();
+            if (!Uri.TryCreate(SourceUrl, UriKind.Absolute, out var uri) ||
+                string.IsNullOrEmpty(uri.Host) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                yield return new ValidationResult(
+                    "Ссылка необязательна. Если указываете — введите полный адрес с протоколом (https://…).",
+                    [nameof(SourceUrl)]);
+            }
+        }
+
         if (!RussianContentRules.IsPredominantlyRussian(Headline))
         {
             yield return new ValidationResult(

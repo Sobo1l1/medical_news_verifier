@@ -13,8 +13,28 @@ public sealed class AnalysisApiController(
     ILogger<AnalysisApiController> logger) : ControllerBase
 {
     [HttpPost("start")]
-    public IActionResult Start([FromBody] AnalyzeNewsInputModel input)
+    public IActionResult Start([FromBody] AnalyzeNewsInputModel? input)
     {
+        if (input is null)
+        {
+            return BadRequest(new { message = "Пустое тело запроса или неверный JSON. Убедитесь, что Content-Type: application/json." });
+        }
+
+        if (string.IsNullOrWhiteSpace(input.Headline) && !string.IsNullOrWhiteSpace(input.NewsText))
+        {
+            var firstLine = input.NewsText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault() ?? string.Empty;
+            if (firstLine.Length > 0)
+            {
+                input.Headline = firstLine.Length <= 500 ? firstLine : firstLine[..500];
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(input.SourceUrl))
+        {
+            input.SourceUrl = null;
+        }
+
         if (!TryValidateModel(input))
         {
             return ValidationProblem(ModelState);

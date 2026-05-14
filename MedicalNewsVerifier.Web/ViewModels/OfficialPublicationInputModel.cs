@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MedicalNewsVerifier.Web.ViewModels;
 
-public class OfficialPublicationInputModel
+public class OfficialPublicationInputModel : IValidatableObject
 {
     [Required(ErrorMessage = "Укажите источник")]
     [MaxLength(250)]
@@ -16,7 +16,6 @@ public class OfficialPublicationInputModel
 
     [Required(ErrorMessage = "Укажите URL")]
     [MaxLength(500)]
-    [Url(ErrorMessage = "Введите корректный URL")]
     [Display(Name = "URL")]
     public string Url { get; set; } = string.Empty;
 
@@ -27,4 +26,17 @@ public class OfficialPublicationInputModel
 
     [Display(Name = "Дата публикации (UTC)")]
     public DateTime? PublishedAtUtc { get; set; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        Url = Url.Trim();
+        if (!Uri.TryCreate(Url, UriKind.Absolute, out var uri) ||
+            string.IsNullOrEmpty(uri.Host) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            yield return new ValidationResult(
+                "Введите полный URL с протоколом (https://…), например ссылку на оригинал материала.",
+                [nameof(Url)]);
+        }
+    }
 }

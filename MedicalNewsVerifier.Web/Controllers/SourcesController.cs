@@ -1,3 +1,4 @@
+using MedicalNewsVerifier.Web;
 using MedicalNewsVerifier.Web.Data;
 using MedicalNewsVerifier.Web.Models;
 using MedicalNewsVerifier.Web.ViewModels;
@@ -36,7 +37,7 @@ public class SourcesController(AppDbContext db) : Controller
         {
             Name = input.Name.Trim(),
             BaseUrl = input.BaseUrl.Trim(),
-            AccessedOnUtc = input.AccessedOnUtc,
+            AccessedOnUtc = DateTimeUtc.ToPostgresUtc(input.AccessedOnUtc),
             IsEnabled = input.IsEnabled,
             SortOrder = maxOrder + 10
         });

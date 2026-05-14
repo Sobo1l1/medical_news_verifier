@@ -8,7 +8,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews()
     .AddJsonOptions(o =>
     {
-        o.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+        var j = o.JsonSerializerOptions;
+        j.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+        j.PropertyNameCaseInsensitive = true;
     });
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));

@@ -1,3 +1,4 @@
+using MedicalNewsVerifier.Web;
 using MedicalNewsVerifier.Web.Data;
 using MedicalNewsVerifier.Web.Models;
 using MedicalNewsVerifier.Web.ViewModels;
@@ -37,7 +38,9 @@ public class CorpusController(AppDbContext db) : Controller
             Title = input.Title.Trim(),
             Url = input.Url.Trim(),
             Content = input.Content.Trim(),
-            PublishedAtUtc = input.PublishedAtUtc ?? DateTime.UtcNow
+            PublishedAtUtc = input.PublishedAtUtc is { } pub
+                ? DateTimeUtc.ToPostgresUtc(pub)
+                : DateTime.UtcNow
         });
 
         await db.SaveChangesAsync(cancellationToken);

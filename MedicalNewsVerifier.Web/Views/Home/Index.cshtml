@@ -269,79 +269,140 @@
     {
         <script src="~/js/analysis-markup.js" asp-append-version="true"></script>
     }
-    else
-    {
-        <script>
-            (function () {
-                const form = document.getElementById('newsAnalyzeForm');
-                const host = document.getElementById('analysisProgressHost');
-                const msg = document.getElementById('analysisProgressMessage');
-                const hScore = document.getElementById('analysisHeuristicScore');
-                const lScore = document.getElementById('analysisLlmScore');
-                const cScore = document.getElementById('analysisCombinedScore');
-                if (!form || !host) return;
-
-                form.addEventListener('submit', async function (e) {
-                    e.preventDefault();
-                    if (!form.checkValidity()) {
-                        form.reportValidity();
-                        return;
-                    }
-
-                    host.classList.remove('d-none');
-                    msg.textContent = 'Отправка запроса…';
-                    hScore.textContent = '…';
-                    lScore.textContent = '…';
-                    cScore.textContent = '…';
-
-                    const payload = {
-                        headline: document.querySelector('[name="Input.Headline"]')?.value ?? '',
-                        newsText: document.querySelector('[name="Input.NewsText"]')?.value ?? '',
-                        sourceUrl: document.querySelector('[name="Input.SourceUrl"]')?.value ?? ''
-                    };
-
-                    const startResp = await fetch('/api/analysis/start', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-
-                    if (!startResp.ok) {
-                        msg.textContent = 'Не удалось запустить анализ (проверьте поля и язык текста).';
-                        return;
-                    }
-
-                    const startJson = await startResp.json();
-                    const jobId = startJson.jobId;
-                    msg.textContent = 'Анализ запущен, ожидайте этапы…';
-
-                    const timer = setInterval(async () => {
-                        const st = await fetch('/api/analysis/' + jobId + '/status');
-                        if (!st.ok) {
-                            clearInterval(timer);
-                            msg.textContent = 'Статус анализа недоступен.';
-                            return;
-                        }
-                        const s = await st.json();
-                        if (s.message) msg.textContent = s.message;
-                        if (typeof s.heuristicScore === 'number') hScore.textContent = s.heuristicScore + '/100';
-                        if (typeof s.llmScore === 'number') lScore.textContent = s.llmScore + '/100';
-                        else if (s.phase === 'Completed' && s.llmScore === null) lScore.textContent = '—';
-                        if (typeof s.combinedScore === 'number') cScore.textContent = s.combinedScore + '/100';
-
-                        if (s.phase === 'Completed') {
-                            clearInterval(timer);
-                            if (s.recordId) {
-                                window.location.href = '/Home/Details/' + s.recordId;
-                            }
-                        }
-                        if (s.phase === 'Failed') {
-                            clearInterval(timer);
-                            msg.textContent = 'Ошибка: ' + (s.error || 'неизвестно');
-                        }
-                    }, 450);
-                });
-            })();
-        </script>
+    @{
+        var analysisStartUrl = Url.Action("Start", "AnalysisApi") ?? "";
+        var statusJobPlaceholder = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var analysisStatusUrlTemplate = Url.Action("Status", "AnalysisApi", new { jobId = statusJobPlaceholder }) ?? "";
+        const int detailsIdPlaceholder = 123456789;
+        var detailsUrlTemplate = Url.Action("Details", "Home", new { id = detailsIdPlaceholder }) ?? "";
+        var jso = new System.Text.Json.JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        var analysisStartJson = System.Text.Json.JsonSerializer.Serialize(analysisStartUrl, jso);
+        var analysisStatusJson = System.Text.Json.JsonSerializer.Serialize(analysisStatusUrlTemplate, jso);
+        var detailsUrlJson = System.Text.Json.JsonSerializer.Serialize(detailsUrlTemplate, jso);
+        var statusPlaceholderJson = System.Text.Json.JsonSerializer.Serialize(statusJobPlaceholder.ToString("D"), jso);
+        var detailsPlaceholderJson = System.Text.Json.JsonSerializer.Serialize(detailsIdPlaceholder.ToString(System.Globalization.CultureInfo.InvariantCulture), jso);
     }
+    <script>
+        (function () {
+            const analysisStartUrl = @Html.Raw(analysisStartJson);
+            const analysisStatusUrlTemplate = @Html.Raw(analysisStatusJson);
+            const detailsUrlTemplate = @Html.Raw(detailsUrlJson);
+            const statusJobPlaceholder = @Html.Raw(statusPlaceholderJson);
+            const detailsIdPlaceholder = @Html.Raw(detailsPlaceholderJson);
+            const form = document.getElementById('newsAnalyzeForm');
+            const host = document.getElementById('analysisProgressHost');
+            const msg = document.getElementById('analysisProgressMessage');
+            const hScore = document.getElementById('analysisHeuristicScore');
+            const lScore = document.getElementById('analysisLlmScore');
+            const cScore = document.getElementById('analysisCombinedScore');
+            if (!form || !host || !analysisStartUrl) return;
+
+            function statusUrl(jobId) {
+                return analysisStatusUrlTemplate.replace(statusJobPlaceholder, jobId);
+            }
+            function detailsUrl(id) {
+                return detailsUrlTemplate.replace(detailsIdPlaceholder, String(id));
+            }
+
+            form.addEventListener('submit', async function (e) {
+                const submitter = e.submitter;
+                if (submitter && submitter.getAttribute('name') === 'forceNew' && submitter.value === 'true') {
+                    return;
+                }
+
+                e.preventDefault();
+                if (!form.checkValidity()) {
+                    form.reportValidity();
+                    return;
+                }
+
+                host.classList.remove('d-none');
+                msg.textContent = 'Отправка запроса…';
+                msg.classList.remove('text-danger');
+                hScore.textContent = '…';
+                lScore.textContent = '…';
+                cScore.textContent = '…';
+
+                const payload = {
+                    headline: document.querySelector('[name="Input.Headline"]')?.value ?? '',
+                    newsText: document.querySelector('[name="Input.NewsText"]')?.value ?? '',
+                    sourceUrl: (() => {
+                        const v = document.querySelector('[name="Input.SourceUrl"]')?.value?.trim() ?? '';
+                        return v === '' ? null : v;
+                    })()
+                };
+
+                const startResp = await fetch(analysisStartUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!startResp.ok) {
+                    let detail = 'HTTP ' + startResp.status;
+                    try {
+                        const errBody = await startResp.json();
+                        if (errBody.errors && typeof errBody.errors === 'object') {
+                            const lines = [];
+                            for (const key of Object.keys(errBody.errors)) {
+                                const arr = errBody.errors[key];
+                                if (Array.isArray(arr)) {
+                                    for (const line of arr) {
+                                        lines.push(line);
+                                    }
+                                }
+                            }
+                            if (lines.length) {
+                                detail = lines.join(' ');
+                            }
+                        } else if (typeof errBody.message === 'string' && errBody.message) {
+                            detail = errBody.message;
+                        } else if (typeof errBody.title === 'string' && errBody.title) {
+                            detail = errBody.title;
+                        }
+                    } catch {
+                        /* ignore */
+                    }
+                    msg.classList.add('text-danger');
+                    msg.textContent = 'Не удалось запустить анализ: ' + detail;
+                    return;
+                }
+
+                const startJson = await startResp.json();
+                const jobId = startJson.jobId;
+                if (!jobId) {
+                    msg.classList.add('text-danger');
+                    msg.textContent = 'Сервер не вернул идентификатор задания.';
+                    return;
+                }
+                msg.textContent = 'Анализ запущен, ожидайте этапы…';
+
+                const timer = setInterval(async () => {
+                    const st = await fetch(statusUrl(jobId), { headers: { 'Accept': 'application/json' } });
+                    if (!st.ok) {
+                        clearInterval(timer);
+                        msg.textContent = 'Статус анализа недоступен (HTTP ' + st.status + ').';
+                        return;
+                    }
+                    const s = await st.json();
+                    if (s.message) msg.textContent = s.message;
+                    if (typeof s.heuristicScore === 'number') hScore.textContent = s.heuristicScore + '/100';
+                    if (typeof s.llmScore === 'number') lScore.textContent = s.llmScore + '/100';
+                    else if (s.phase === 'Completed' && s.llmScore === null) lScore.textContent = '—';
+                    if (typeof s.combinedScore === 'number') cScore.textContent = s.combinedScore + '/100';
+
+                    if (s.phase === 'Completed') {
+                        clearInterval(timer);
+                        if (s.recordId) {
+                            window.location.href = detailsUrl(s.recordId);
+                        }
+                    }
+                    if (s.phase === 'Failed') {
+                        clearInterval(timer);
+                        msg.textContent = 'Ошибка: ' + (s.error || 'неизвестно');
+                    }
+                }, 450);
+            });
+        })();
+    </script>
 }
