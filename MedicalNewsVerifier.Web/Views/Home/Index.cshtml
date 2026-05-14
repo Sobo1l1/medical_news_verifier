@@ -107,6 +107,18 @@
                             var heuristicShown = string.IsNullOrEmpty(Model.LastAnalysis.LlmSummary) && Model.LastAnalysis.HeuristicReliabilityScore == 0
                                 ? Model.LastAnalysis.ReliabilityScore
                                 : Model.LastAnalysis.HeuristicReliabilityScore;
+                            var llmHasResult = Model.LastAnalysis.LlmAlignmentScore.HasValue;
+                            var llmHasSummary = !string.IsNullOrWhiteSpace(Model.LastAnalysis.LlmSummary);
+                            var llmStatusText = llmHasResult
+                                ? $"{Model.LastAnalysis.LlmAlignmentScore}/100"
+                                : llmHasSummary
+                                    ? "Ошибка"
+                                    : "—";
+                            var llmSummaryAlertClass = llmHasResult
+                                ? "alert-light"
+                                : llmHasSummary
+                                    ? "alert-warning"
+                                    : "alert-light";
                         }
                         <div class="col-sm-4">
                             <div class="border rounded p-2">
@@ -117,7 +129,7 @@
                         <div class="col-sm-4">
                             <div class="border rounded p-2">
                                 <div class="text-muted">Ollama</div>
-                                <div class="fw-semibold">@(Model.LastAnalysis.LlmAlignmentScore.HasValue ? $"{Model.LastAnalysis.LlmAlignmentScore}/100" : "—")</div>
+                                <div class="fw-semibold">@llmStatusText</div>
                             </div>
                         </div>
                         <div class="col-sm-4">
@@ -127,9 +139,9 @@
                             </div>
                         </div>
                     </div>
-                    @if (!string.IsNullOrWhiteSpace(Model.LastAnalysis.LlmSummary))
+                    @if (llmHasSummary)
                     {
-                        <div class="alert alert-light border small mb-3">
+                        <div class="alert @llmSummaryAlertClass border small mb-3">
                             <div class="fw-semibold mb-1">Краткое резюме модели (Ollama)</div>
                             <div class="text-break">@Model.LastAnalysis.LlmSummary</div>
                         </div>

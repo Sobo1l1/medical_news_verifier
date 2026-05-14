@@ -333,7 +333,9 @@ public partial class NewsAnalysisService(
     {
         if (!llm.WasAttempted)
         {
-            return null;
+            return string.IsNullOrWhiteSpace(llm.ErrorMessage)
+                ? null
+                : $"Ollama: {llm.ErrorMessage}";
         }
 
         if (llm.Succeeded)

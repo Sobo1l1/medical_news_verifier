@@ -12,7 +12,7 @@ public sealed class OllamaOptions
 {
     public bool Enabled { get; set; } = true;
     public string BaseUrl { get; set; } = "http://localhost:11434/v1";
-    public string Model { get; set; } = "qwen2.5:latest";
+    public string Model { get; set; } = "qwen3.5:9b";
     public int TimeoutSeconds { get; set; } = 120;
     public int MaxCorpusCharsPerSnippet { get; set; } = 1200;
     public int MaxCorpusSnippets { get; set; } = 4;
@@ -70,10 +70,15 @@ public sealed partial class OllamaComparisonClient(
         var corpusBlock = BuildCorpusBlock(corpusExcerpts, opt.MaxCorpusSnippets, opt.MaxCorpusCharsPerSnippet);
         var systemPrompt =
             """
+            НЕ ИСПОЛЬЗУЙ РЕЖИМ THINKING/МЫШЛЕНИЯ. ОТВЕЧАЙ ПРЯМО И БЫСТРО.
+            НЕ ДОБАВЛЯЙ НИКАКИЕ ТЕГИ <think>, <thinking>, ```think ИЛИ ПОДОБНЫЕ.
+            
             Ты медицинский фактчекер. Сравни новость пользователя с выдержками из доверенных материалов.
             Оцени согласованность фактов и тональности с опорой только на переданные выдержки (не выдумывай новые источники).
-            Верни СТРОГО один JSON-объект без пояснений до и после, без markdown, со полями:
+            
+            ОТВЕТЬ ТОЛЬКО JSON-ОБЪЕКТОМ БЕЗ КАКИХ-ЛИБО ДРУГИХ ТЕКСТОВ:
             {"alignmentScore": <целое 0-100>, "summary": "<кратко на русском>", "flags": ["<строка>", ...]}
+            
             alignmentScore: 80-100 если утверждения в целом согласуются или нейтральны относительно выдержек;
             40-79 если есть пробелы, обобщения или слабая опора;
             0-39 при явных противоречиях или сильной сенсационности относительно выдержек.
@@ -93,7 +98,8 @@ public sealed partial class OllamaComparisonClient(
         {
             Model = opt.Model.Trim(),
             Stream = false,
-            Temperature = 0.15,
+            Temperature = 0.0,  // Полностью детерминированный, без thinking
+            TopP = 0.1,         // Минимальный выбор вариантов
             Messages =
             [
                 new ChatMessage { Role = "system", Content = systemPrompt },
@@ -120,17 +126,21 @@ public sealed partial class OllamaComparisonClient(
                 };
             }
 
+            logger.LogInformation("Ollama full response body: {Body}", body);
+
             using var doc = JsonDocument.Parse(body);
             var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
+            logger.LogInformation("Ollama raw response (content field): Length={Length}, Content={Content}", content.Length, content);
+
             var parsed = ParseModelJson(content);
             if (parsed is null)
             {
-                logger.LogWarning("Ollama: не удалось разобрать JSON из ответа: {Preview}", Truncate(content, 400));
+                logger.LogWarning("Ollama: не удалось разобрать JSON. Полный ответ: {FullContent}", content);
                 return new OllamaComparisonOutcome
                 {
                     WasAttempted = true,
                     Succeeded = false,
-                    ErrorMessage = "Модель вернула ответ, который не удалось разобрать как JSON."
+                    ErrorMessage = $"Модель вернула ответ, который не удалось разобрать как JSON. Сырой ответ: {content}"
                 };
             }
 
@@ -195,7 +205,16 @@ public sealed partial class OllamaComparisonClient(
     private static LlmJsonPayload? ParseModelJson(string content)
     {
         var trimmed = content.Trim();
+
+        // Удаляем markdown блоки
         trimmed = MarkdownFenceRegex().Replace(trimmed, "").Trim();
+
+        // Удаляем thinking блоки (разные варианты)
+        trimmed = Regex.Replace(trimmed, @"<think>.*?</think>", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        trimmed = Regex.Replace(trimmed, @"<thinking>.*?</thinking>", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        trimmed = Regex.Replace(trimmed, @"```think.*?```", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        trimmed = Regex.Replace(trimmed, @"^.*?(?=\{)", "", RegexOptions.Singleline); // Удаляем всё до первой {
+
         var start = trimmed.IndexOf('{');
         var end = trimmed.LastIndexOf('}');
         if (start < 0 || end <= start)
@@ -240,6 +259,12 @@ public sealed partial class OllamaComparisonClient(
 
         [JsonPropertyName("temperature")]
         public double Temperature { get; set; }
+
+        [JsonPropertyName("top_p")]
+        public double? TopP { get; set; }
+
+        [JsonPropertyName("max_tokens")]
+        public int? MaxTokens { get; set; }
     }
 
     private sealed class ChatMessage
