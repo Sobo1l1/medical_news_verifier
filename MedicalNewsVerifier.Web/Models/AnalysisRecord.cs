@@ -24,12 +24,12 @@ public class AnalysisRecord
     /// <summary>Согласованность с доверенными выдержками по мнению локальной LLM; null если анализ не выполнялся или сбой.</summary>
     public int? LlmAlignmentScore { get; set; }
 
-    [MaxLength(4000)]
+    [MaxLength(8000)]
     public string? LlmSummary { get; set; }
 
     public VerificationStatus Status { get; set; }
 
-    [MaxLength(4000)]
+    [MaxLength(8000)]
     public string Explanation { get; set; } = string.Empty;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

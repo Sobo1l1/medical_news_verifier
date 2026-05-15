@@ -541,7 +541,9 @@ public partial class NewsAnalysisService(
             "Оценка локальной LLM (Ollama) носит вспомогательный характер и не заменяет экспертизу врача или официальных рекомендаций."
         };
 
-        return string.Join('\n', lines);
+        var explanation = string.Join('\n', lines);
+        // Truncate to 8000 characters to fit the database constraint
+        return explanation.Length > 8000 ? explanation[..7997] + "…" : explanation;
     }
 
     private static string BuildLlmExplanationLine(OllamaComparisonOutcome llm)
@@ -553,7 +555,21 @@ public partial class NewsAnalysisService(
 
         if (llm.Succeeded && llm.AlignmentScore.HasValue)
         {
-            var tail = string.IsNullOrWhiteSpace(llm.Summary) ? string.Empty : $" Кратко: {llm.Summary.Trim()}";
+            string tail;
+            if (string.IsNullOrWhiteSpace(llm.Summary))
+            {
+                tail = string.Empty;
+            }
+            else
+            {
+                var summary = llm.Summary.Trim();
+                // Limit summary to 1500 characters in explanation to leave room for other content
+                if (summary.Length > 1500)
+                {
+                    summary = summary[..1497] + "…";
+                }
+                tail = $" Кратко: {summary}";
+            }
             return $"Локальная модель (Ollama): согласованность с выдержками корпуса — {llm.AlignmentScore} из 100.{tail}";
         }
 
@@ -1091,7 +1107,7 @@ public partial class NewsAnalysisService(
 
     private sealed class FeatureWeights
     {
-        public int BaseScore { get; set; } = 55;
+        public int BaseScore { get; set; } = 40;
         public int EmotionalDensityPenalty { get; set; } = 22;
         public int ManipulativeDensityPenalty { get; set; } = 36;
         public int EvaluativeDensityPenalty { get; set; } = 10;

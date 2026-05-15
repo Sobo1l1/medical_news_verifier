@@ -16,6 +16,8 @@ public sealed class OllamaOptions
     public int TimeoutSeconds { get; set; } = 120;
     public int MaxCorpusCharsPerSnippet { get; set; } = 1200;
     public int MaxCorpusSnippets { get; set; } = 4;
+    /// <summary>Максимальное число токенов в ответе от модели. По умолчанию ~2000 токенов ≈ 5-6 КБ текста.</summary>
+    public int MaxResponseTokens { get; set; } = 2000;
 }
 
 public sealed partial class OllamaComparisonClient(
@@ -70,19 +72,76 @@ public sealed partial class OllamaComparisonClient(
         var corpusBlock = BuildCorpusBlock(corpusExcerpts, opt.MaxCorpusSnippets, opt.MaxCorpusCharsPerSnippet);
         var systemPrompt =
             """
-            НЕ ИСПОЛЬЗУЙ РЕЖИМ THINKING/МЫШЛЕНИЯ. ОТВЕЧАЙ ПРЯМО И БЫСТРО.
-            НЕ ДОБАВЛЯЙ НИКАКИЕ ТЕГИ <think>, <thinking>, ```think ИЛИ ПОДОБНЫЕ.
-            
-            Ты медицинский фактчекер. Сравни новость пользователя с выдержками из доверенных материалов.
-            Оцени согласованность фактов и тональности с опорой только на переданные выдержки (не выдумывай новые источники).
-            
-            ОТВЕТЬ ТОЛЬКО JSON-ОБЪЕКТОМ БЕЗ КАКИХ-ЛИБО ДРУГИХ ТЕКСТОВ:
-            {"alignmentScore": <целое 0-100>, "summary": "<кратко на русском>", "flags": ["<строка>", ...]}
-            
-            alignmentScore: 80-100 если утверждения в целом согласуются или нейтральны относительно выдержек;
-            40-79 если есть пробелы, обобщения или слабая опора;
-            0-39 при явных противоречиях или сильной сенсационности относительно выдержек.
-            flags: короткие метки (например "possible_contradiction", "insufficient_corpus", "sensational_tone").
+            ТЫ ОБЯЗАН ВЕРНУТЬ СТРОГО ВАЛИДНЫЙ JSON И НИЧЕГО КРОМЕ JSON.
+
+            ЗАПРЕЩЕНО:
+            - любой текст вне JSON;
+            - markdown;
+            - комментарии;
+            - пояснения;
+            - reasoning/thinking;
+            - служебные сообщения;
+            - ```json блоки;
+            - переносы с пояснениями.
+
+            ЕСЛИ ДАННЫХ НЕДОСТАТОЧНО — ВСЁ РАВНО ВЕРНИ JSON ПО СХЕМЕ.
+
+            Ты — медицинский фактчекер и аналитик достоверности.
+            Твоя задача:
+            1. Сравнить текст новости пользователя с предоставленными выдержками из доверенных источников.
+            2. Оценивать ТОЛЬКО фактическое соответствие переданным выдержкам.
+            3. НЕ додумывать факты.
+            4. НЕ учитывать стиль написания как ложность, если факты не противоречат выдержкам.
+            5. Если выдержки не покрывают часть утверждений — снижать уверенность, но не считать это автоматически ложью.
+            6. Если новость содержит категоричные, сенсационные, манипулятивные или неподтверждённые формулировки — отражать это во flags.
+            7. Если источники противоречат новости напрямую — существенно снижать alignmentScore.
+
+            ТРЕБОВАНИЯ К ОЦЕНКЕ:
+            - 80-100:
+              Утверждения в целом подтверждаются выдержками либо не противоречат им.
+            - 40-79:
+              Есть слабая опора, неполное покрытие, преувеличения, неоднозначность или недостаток подтверждений.
+            - 0-39:
+              Есть явные противоречия, сильная сенсационность, искажение выводов или неподтверждённые категоричные утверждения.
+
+            ТРЕБОВАНИЯ К summary:
+            - Только русский язык.
+            - Кратко.
+            - 1-3 предложения.
+            - Без markdown.
+            - Без кавычек внутри текста.
+            - Описывать только вывод проверки.
+
+            ТРЕБОВАНИЯ К flags:
+            Используй короткие snake_case метки.
+            Допустимые примеры:
+            - "possible_contradiction"
+            - "insufficient_corpus"
+            - "sensational_tone"
+            - "unsupported_claims"
+            - "exaggeration"
+            - "selective_framing"
+            - "consistent_with_sources"
+            - "neutral_tone"
+
+            ЕСЛИ ФЛАГОВ НЕТ — ВЕРНИ ПУСТОЙ МАССИВ.
+
+            СТРОГАЯ СХЕМА ОТВЕТА:
+            {
+              "alignmentScore": <integer 0-100>,
+              "summary": "<string>",
+              "flags": ["<string>"]
+            }
+
+            ВАЖНО:
+            - alignmentScore должен быть ЦЕЛЫМ ЧИСЛОМ.
+            - flags всегда массив.
+            - summary всегда строка.
+            - JSON должен корректно парситься стандартным JSON parser.
+            - Не экранируй JSON в строку.
+            - Не добавляй лишние поля.
+            - Не добавляй trailing commas.
+            - Верни только один JSON-объект.
             """;
 
         var userPrompt =
@@ -91,6 +150,7 @@ public sealed partial class OllamaComparisonClient(
             {userNews}
 
             ВЫДЕРЖКИ ИЗ ДОВЕРЕННОГО КОРПУСА:
+         
             {corpusBlock}
             """;
 
@@ -99,7 +159,8 @@ public sealed partial class OllamaComparisonClient(
             Model = opt.Model.Trim(),
             Stream = false,
             Temperature = 0.0,  // Полностью детерминированный, без thinking
-            TopP = 0.1,         // Минимальный выбор вариантов
+            TopP = 0.1,
+            MaxTokens = opt.MaxResponseTokens,  // Ограничиваем длину ответа
             Messages =
             [
                 new ChatMessage { Role = "system", Content = systemPrompt },
@@ -129,18 +190,32 @@ public sealed partial class OllamaComparisonClient(
             logger.LogInformation("Ollama full response body: {Body}", body);
 
             using var doc = JsonDocument.Parse(body);
-            var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
-            logger.LogInformation("Ollama raw response (content field): Length={Length}, Content={Content}", content.Length, content);
+            var messageObj = doc.RootElement.GetProperty("choices")[0].GetProperty("message");
+            
+            // Пытаемся получить content, если пуст — ищем reasoning
+            var content = messageObj.GetProperty("content").GetString() ?? "";
+            
+            // Если content пуст, пробуем reasoning (некоторые модели туда вывалят ответ)
+            if (string.IsNullOrWhiteSpace(content) && messageObj.TryGetProperty("reasoning", out var reasoningProp))
+            {
+                var reasoning = reasoningProp.GetString() ?? "";
+                logger.LogWarning("Ollama: content пуст, используем reasoning поле (длина {Length})", reasoning.Length);
+                content = reasoning;
+            }
+            
+            logger.LogInformation("Ollama raw response (content field): Length={Length}, Content={Content}", content.Length, content.Length > 200 ? content[..200] : content);
 
             var parsed = ParseModelJson(content);
             if (parsed is null)
             {
-                logger.LogWarning("Ollama: не удалось разобрать JSON. Полный ответ: {FullContent}", content);
+                logger.LogWarning("Ollama: не удалось разобрать JSON. Длина: {Length} chars. Первые 500 символов: {Preview}",
+                    content.Length,
+                    content.Length > 500 ? content[..500] : content);
                 return new OllamaComparisonOutcome
                 {
                     WasAttempted = true,
                     Succeeded = false,
-                    ErrorMessage = $"Модель вернула ответ, который не удалось разобрать как JSON. Сырой ответ: {content}"
+                    ErrorMessage = $"Модель вернула ответ, который не удалось разобрать как JSON (длина {content.Length}). Проверьте логи приложения."
                 };
             }
 
@@ -150,12 +225,19 @@ public sealed partial class OllamaComparisonClient(
                 score = Math.Clamp(score.Value, 0, 100);
             }
 
+            var summary = parsed.Summary?.Trim();
+            // Дополнительная подстраховка: обрезаем summary до 3500 символов на случай, если модель не соблюдала max_tokens
+            if (summary?.Length > 3500)
+            {
+                summary = summary[..3497] + "…";
+            }
+
             return new OllamaComparisonOutcome
             {
                 WasAttempted = true,
                 Succeeded = true,
                 AlignmentScore = score,
-                Summary = string.IsNullOrWhiteSpace(parsed.Summary) ? null : parsed.Summary.Trim()
+                Summary = summary
             };
         }
         catch (OperationCanceledException)
@@ -206,23 +288,38 @@ public sealed partial class OllamaComparisonClient(
     {
         var trimmed = content.Trim();
 
-        // Удаляем markdown блоки
-        trimmed = MarkdownFenceRegex().Replace(trimmed, "").Trim();
-
-        // Удаляем thinking блоки (разные варианты)
+        // Агрессивно удаляем все thinking блоки (разные форматы)
         trimmed = Regex.Replace(trimmed, @"<think>.*?</think>", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
         trimmed = Regex.Replace(trimmed, @"<thinking>.*?</thinking>", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
         trimmed = Regex.Replace(trimmed, @"```think.*?```", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
-        trimmed = Regex.Replace(trimmed, @"^.*?(?=\{)", "", RegexOptions.Singleline); // Удаляем всё до первой {
+        trimmed = Regex.Replace(trimmed, @"\*\*Think:\*\*.*?(?=\{)", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        
+        // Удаляем Qwen-стиль thinking (начинается с "Thinking Process:" и идёт до первого {)
+        trimmed = Regex.Replace(trimmed, @"^.*?Thinking\s+Process:.*?(?=\{)", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        
+        // Удаляем весь текст типа "1. **Analyze the Request:**" и подобные структурированные рассуждения до первого {
+        trimmed = Regex.Replace(trimmed, @"^\s*\d+\s*\.\s*\*\*.*?(?=\{)", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
 
-        var start = trimmed.IndexOf('{');
-        var end = trimmed.LastIndexOf('}');
-        if (start < 0 || end <= start)
+        // Удаляем markdown блоки
+        trimmed = MarkdownFenceRegex().Replace(trimmed, "").Trim();
+
+        // Удаляем всё до первой {
+        var jsonStart = trimmed.IndexOf('{');
+        if (jsonStart < 0)
         {
             return null;
         }
 
-        var json = trimmed[start..(end + 1)];
+        trimmed = trimmed[jsonStart..].Trim();
+
+        // Находим последний }
+        var jsonEnd = trimmed.LastIndexOf('}');
+        if (jsonEnd <= 0)
+        {
+            return null;
+        }
+
+        var json = trimmed[..(jsonEnd + 1)];
         try
         {
             return JsonSerializer.Deserialize<LlmJsonPayload>(json, JsonOptions);
