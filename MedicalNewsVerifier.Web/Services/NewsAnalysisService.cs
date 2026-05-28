@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using MedicalNewsVerifier.Web.Data;
@@ -31,77 +32,16 @@ public partial class NewsAnalysisService(
         bool forceNew,
         CancellationToken cancellationToken)
     {
-        var normalizedHeadline = Normalize(input.Headline);
-        var normalizedText = Normalize(input.NewsText);
-        var recentRecords = await db.AnalysisRecords
-            .Include(r => r.SuspiciousFragments)
-            .OrderByDescending(r => r.CreatedAtUtc)
-            .Take(200)
-            .ToListAsync(cancellationToken);
-
-        var existing = recentRecords.FirstOrDefault(r =>
-            Normalize(r.Headline) == normalizedHeadline &&
-            Normalize(r.NewsText) == normalizedText);
-
-        if (!forceNew && existing is not null)
+        if (!forceNew)
         {
-            var historyMatches = await GetOfficialMatchesInternalAsync(input.NewsText, cancellationToken);
-            return (existing, historyMatches, true);
+            var (existing, historyMatches) = await TryReuseExistingRecordAsync(input, cancellationToken);
+            if (existing is not null)
+            {
+                return (existing, historyMatches, true);
+            }
         }
 
-        var doc = AnalyzedDocument.From(input.Headline, input.NewsText);
-        var fullText = doc.FullText;
-        var lexicons = LoadLexicons();
-        var weights = LoadWeights();
-
-        var publications = await LoadPublicationsCorpusAsync(cancellationToken);
-        var matches = RankMatchesToViewModels(input.NewsText, publications);
-        var corpusForLlm = SelectCorpusForLlm(input.NewsText, publications, configuration.GetValue("Ollama:MaxCorpusSnippets", 4));
-
-        var pythonTask = pythonClient.AnalyzeAsync(fullText, cancellationToken);
-        var llmTask = ollamaClient.CompareNewsToCorpusAsync(input.Headline, input.NewsText, corpusForLlm, cancellationToken);
-        await Task.WhenAll(pythonTask, llmTask);
-
-        var pythonOutcome = await pythonTask;
-        var llmOutcome = await llmTask;
-
-        var (lexical, lexicalFragments) = AnalyzeLexicalWithSpans(fullText, lexicons);
-        var pythonFragments = pythonOutcome.Fragments;
-
-        var fragments = new List<SuspiciousFragment>();
-        fragments.AddRange(lexicalFragments);
-        fragments.AddRange(MapPythonFragments(pythonFragments));
-        fragments = DeduplicateIdenticalSpans(fragments);
-        fragments = CapFragments(fragments);
-
-        var heuristicScore = CalculateScore(weights, lexical, pythonFragments, matches);
-        heuristicScore = Math.Clamp(heuristicScore, 0, 100);
-
-        var (combinedScore, status) = CombineHeuristicAndLlm(heuristicScore, llmOutcome);
-
-        var record = new AnalysisRecord
-        {
-            Headline = input.Headline,
-            NewsText = input.NewsText,
-            SourceUrl = input.SourceUrl,
-            HeuristicReliabilityScore = heuristicScore,
-            LlmAlignmentScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null,
-            LlmSummary = BuildLlmSummaryLine(llmOutcome),
-            ReliabilityScore = combinedScore,
-            Status = status,
-            Explanation = BuildExplanation(
-                combinedScore,
-                heuristicScore,
-                llmOutcome,
-                fragments.Count,
-                matches.Count,
-                lexical,
-                pythonOutcome),
-            SuspiciousFragments = fragments
-        };
-
-        db.AnalysisRecords.Add(record);
-        await db.SaveChangesAsync(cancellationToken);
+        var (record, matches) = await AnalyzeAndPersistAsync(input, cancellationToken);
         return (record, matches, false);
     }
 
@@ -115,21 +55,9 @@ public partial class NewsAnalysisService(
                 s.Message = "Загрузка корпуса доверенных материалов и источников…";
             });
 
-            var normalizedHeadline = Normalize(input.Headline);
-            var normalizedText = Normalize(input.NewsText);
-            var recentRecords = await db.AnalysisRecords
-                .Include(r => r.SuspiciousFragments)
-                .OrderByDescending(r => r.CreatedAtUtc)
-                .Take(200)
-                .ToListAsync(cancellationToken);
-
-            var existing = recentRecords.FirstOrDefault(r =>
-                Normalize(r.Headline) == normalizedHeadline &&
-                Normalize(r.NewsText) == normalizedText);
-
+            var (existing, matches) = await TryReuseExistingRecordAsync(input, cancellationToken);
             if (existing is not null)
             {
-                var historyMatches = await GetOfficialMatchesInternalAsync(input.NewsText, cancellationToken);
                 jobStore.Patch(jobId, s =>
                 {
                     s.Phase = "Completed";
@@ -145,11 +73,7 @@ public partial class NewsAnalysisService(
                 return;
             }
 
-            var doc = AnalyzedDocument.From(input.Headline, input.NewsText);
-            var fullText = doc.FullText;
-            var lexicons = LoadLexicons();
-            var weights = LoadWeights();
-
+            var maxCorpusSnippets = configuration.GetValue("Ollama:MaxCorpusSnippets", 4);
             var publications = await LoadPublicationsCorpusAsync(cancellationToken);
             jobStore.Patch(jobId, s =>
             {
@@ -157,105 +81,18 @@ public partial class NewsAnalysisService(
                 s.Message = "Параллельно выполняются эвристический модуль (Python) и сравнение с корпусом через Ollama…";
             });
 
-            var matches = RankMatchesToViewModels(input.NewsText, publications);
-            var corpusForLlm = SelectCorpusForLlm(input.NewsText, publications, configuration.GetValue("Ollama:MaxCorpusSnippets", 4));
-
-            async Task<PythonAnalysisOutcome> RunPythonAsync()
-            {
-                return await pythonClient.AnalyzeAsync(fullText, cancellationToken);
-            }
-
-            async Task<OllamaComparisonOutcome> RunLlmAsync()
-            {
-                var outcome = await ollamaClient.CompareNewsToCorpusAsync(
-                    input.Headline,
-                    input.NewsText,
-                    corpusForLlm,
-                    cancellationToken);
-
-                jobStore.Patch(jobId, s =>
-                {
-                    s.LlmScore = outcome.Succeeded ? outcome.AlignmentScore : null;
-                    s.LlmSummaryPreview = outcome.Succeeded
-                        ? TruncateForJob(outcome.Summary)
-                        : TruncateForJob(outcome.ErrorMessage);
-                    s.Message = outcome.Succeeded
-                        ? "Локальная модель (Ollama) завершила сравнение с корпусом."
-                        : "Сравнение через Ollama завершилось с ошибкой или отключено; итог будет по эвристике.";
-                });
-
-                return outcome;
-            }
-
-            var pythonTask = RunPythonAsync();
-            var llmTask = RunLlmAsync();
-            await Task.WhenAll(pythonTask, llmTask);
-
-            var pythonOutcome = await pythonTask;
-            var llmOutcome = await llmTask;
-
-            jobStore.Patch(jobId, s =>
-            {
-                s.Phase = "HeuristicScoring";
-                s.Message = "Подсчёт эвристической оценки (лексика, Python, совпадения с корпусом)…";
-            });
-
-            var (lexical, lexicalFragments) = AnalyzeLexicalWithSpans(fullText, lexicons);
-            var pythonFragments = pythonOutcome.Fragments;
-
-            var fragments = new List<SuspiciousFragment>();
-            fragments.AddRange(lexicalFragments);
-            fragments.AddRange(MapPythonFragments(pythonFragments));
-            fragments = DeduplicateIdenticalSpans(fragments);
-            fragments = CapFragments(fragments);
-
-            var heuristicScore = CalculateScore(weights, lexical, pythonFragments, matches);
-            heuristicScore = Math.Clamp(heuristicScore, 0, 100);
-
-            jobStore.Patch(jobId, s =>
-            {
-                s.HeuristicScore = heuristicScore;
-                s.Message = "Эвристический анализ завершён. Формируется итоговая оценка…";
-            });
-
-            var (combinedScore, status) = CombineHeuristicAndLlm(heuristicScore, llmOutcome);
-
-            jobStore.Patch(jobId, s =>
-            {
-                s.Phase = "Combining";
-                s.CombinedScore = combinedScore;
-                s.Message = "Сохранение результата…";
-            });
-
-            var record = new AnalysisRecord
-            {
-                Headline = input.Headline,
-                NewsText = input.NewsText,
-                SourceUrl = input.SourceUrl,
-                HeuristicReliabilityScore = heuristicScore,
-                LlmAlignmentScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null,
-                LlmSummary = BuildLlmSummaryLine(llmOutcome),
-                ReliabilityScore = combinedScore,
-                Status = status,
-                Explanation = BuildExplanation(
-                    combinedScore,
-                    heuristicScore,
-                    llmOutcome,
-                    fragments.Count,
-                    matches.Count,
-                    lexical,
-                    pythonOutcome),
-                SuspiciousFragments = fragments
-            };
-
-            db.AnalysisRecords.Add(record);
-            await db.SaveChangesAsync(cancellationToken);
+            var (record, jobMatches) = await AnalyzeAndPersistAsync(
+                input,
+                cancellationToken,
+                publications,
+                maxCorpusSnippets,
+                jobId);
 
             jobStore.Patch(jobId, s =>
             {
                 s.Phase = "Completed";
                 s.RecordId = record.Id;
-                s.CombinedScore = combinedScore;
+                s.CombinedScore = record.ReliabilityScore;
                 s.Message = "Анализ завершён.";
             });
         }
@@ -277,6 +114,162 @@ public partial class NewsAnalysisService(
                 s.Error = ex.Message;
             });
         }
+    }
+
+    private async Task<(AnalysisRecord? record, List<OfficialPublicationMatchVm> matches)> TryReuseExistingRecordAsync(
+        AnalyzeNewsInputModel input,
+        CancellationToken cancellationToken)
+    {
+        var normalizedHeadline = Normalize(input.Headline);
+        var normalizedText = Normalize(input.NewsText);
+
+        var recentRecords = await db.AnalysisRecords
+            .Include(r => r.SuspiciousFragments)
+            .OrderByDescending(r => r.CreatedAtUtc)
+            .Take(200)
+            .ToListAsync(cancellationToken);
+
+        var existing = recentRecords.FirstOrDefault(r =>
+            Normalize(r.Headline) == normalizedHeadline &&
+            Normalize(r.NewsText) == normalizedText);
+
+        if (existing is null)
+        {
+            return (null, new List<OfficialPublicationMatchVm>());
+        }
+
+        var historyMatches = await GetOfficialMatchesInternalAsync(input.NewsText, cancellationToken);
+        return (existing, historyMatches);
+    }
+
+    private async Task<(AnalysisRecord record, List<OfficialPublicationMatchVm> matches)> AnalyzeAndPersistAsync(
+        AnalyzeNewsInputModel input,
+        CancellationToken cancellationToken,
+        List<OfficialPublication>? publications = null,
+        int? maxCorpusSnippets = null,
+        Guid? jobId = null)
+    {
+        var doc = AnalyzedDocument.From(input.Headline, input.NewsText);
+        var fullText = doc.FullText;
+        var lexicons = LoadLexicons();
+        var weights = LoadWeights();
+        var pubs = publications ?? await LoadPublicationsCorpusAsync(cancellationToken);
+        var maxCorpus = maxCorpusSnippets ?? configuration.GetValue("Ollama:MaxCorpusSnippets", 4);
+
+        var matches = RankMatchesToViewModels(input.NewsText, pubs);
+        var corpusForLlm = SelectCorpusForLlm(input.NewsText, pubs, maxCorpus);
+
+        if (jobId.HasValue)
+        {
+            jobStore.Patch(jobId.Value, s =>
+            {
+                s.Message = "Параллельно выполняются эвристический модуль (Python) и сравнение с корпусом через Ollama…";
+            });
+        }
+
+        var pythonTask = pythonClient.AnalyzeAsync(fullText, cancellationToken);
+        var llmTask = ollamaClient.CompareNewsToCorpusAsync(input.Headline, input.NewsText, corpusForLlm, cancellationToken);
+        await Task.WhenAll(pythonTask, llmTask);
+
+        var pythonOutcome = await pythonTask;
+        var llmOutcome = await llmTask;
+
+        if (jobId.HasValue)
+        {
+            jobStore.Patch(jobId.Value, s =>
+            {
+                s.LlmScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null;
+                s.LlmSummaryPreview = llmOutcome.Succeeded
+                    ? TruncateForJob(llmOutcome.Summary)
+                    : TruncateForJob(llmOutcome.ErrorMessage);
+                s.Message = llmOutcome.Succeeded
+                    ? "Локальная модель (Ollama) завершила сравнение с корпусом."
+                    : "Сравнение через Ollama завершилось с ошибкой или отключено; итог будет по эвристике.";
+            });
+        }
+
+        var (lexical, lexicalFragments) = AnalyzeLexicalWithSpans(fullText, lexicons);
+        var pythonFragments = pythonOutcome.Fragments;
+
+        var fragments = DeduplicateIdenticalSpans(
+            CapFragments(
+                lexicalFragments
+                    .Concat(MapPythonFragments(pythonFragments))
+                    .ToList()));
+
+        var heuristicScore = Math.Clamp(
+            CalculateScore(weights, lexical, pythonFragments, matches),
+            0,
+            100);
+
+        if (jobId.HasValue)
+        {
+            jobStore.Patch(jobId.Value, s =>
+            {
+                s.HeuristicScore = heuristicScore;
+                s.Message = "Эвристический анализ завершён. Формируется итоговая оценка…";
+            });
+        }
+
+        var (combinedScore, status) = CombineHeuristicAndLlm(heuristicScore, llmOutcome);
+
+        var record = BuildAnalysisRecord(
+            input,
+            heuristicScore,
+            llmOutcome,
+            combinedScore,
+            status,
+            fragments,
+            matches,
+            lexical,
+            pythonOutcome);
+
+        if (jobId.HasValue)
+        {
+            jobStore.Patch(jobId.Value, s =>
+            {
+                s.Phase = "Combining";
+                s.CombinedScore = combinedScore;
+                s.Message = "Сохранение результата…";
+            });
+        }
+
+        db.AnalysisRecords.Add(record);
+        await db.SaveChangesAsync(cancellationToken);
+        return (record, matches);
+    }
+
+    private AnalysisRecord BuildAnalysisRecord(
+        AnalyzeNewsInputModel input,
+        int heuristicScore,
+        OllamaComparisonOutcome llmOutcome,
+        int combinedScore,
+        VerificationStatus status,
+        List<SuspiciousFragment> fragments,
+        List<OfficialPublicationMatchVm> matches,
+        LexicalFeatures lexical,
+        PythonAnalysisOutcome pythonOutcome)
+    {
+        return new AnalysisRecord
+        {
+            Headline = input.Headline,
+            NewsText = input.NewsText,
+            SourceUrl = input.SourceUrl,
+            HeuristicReliabilityScore = heuristicScore,
+            LlmAlignmentScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null,
+            LlmSummary = BuildLlmSummaryLine(llmOutcome),
+            ReliabilityScore = combinedScore,
+            Status = status,
+            Explanation = BuildExplanation(
+                combinedScore,
+                heuristicScore,
+                llmOutcome,
+                fragments.Count,
+                matches.Count,
+                lexical,
+                pythonOutcome),
+            SuspiciousFragments = fragments
+        };
     }
 
     private static string? TruncateForJob(string? text, int max = 280)
@@ -1019,23 +1012,31 @@ public partial class NewsAnalysisService(
         return score;
     }
 
+    private static readonly ConcurrentDictionary<string, Lexicons> LexiconCache = new();
+    private static readonly ConcurrentDictionary<string, FeatureWeights> WeightCache = new();
+
     private Lexicons LoadLexicons()
     {
         var basePath = configuration["AnalysisLexicons:BasePath"] ?? "Resources/Lexicons";
         var root = Path.Combine(env.ContentRootPath, basePath);
-        return new Lexicons(
-            LoadEmotionalLexicons(root),
-            ReadLexicon(Path.Combine(root, configuration["AnalysisLexicons:ManipulativeFile"] ?? "manipulative_ru.txt")),
-            ReadLexicon(Path.Combine(root, configuration["AnalysisLexicons:EvaluativeFile"] ?? "evaluative_ru.txt")),
-            ReadLexicon(Path.Combine(root, configuration["AnalysisLexicons:SourceCuesFile"] ?? "source_cues_ru.txt")));
+        var emotionalFile = configuration["AnalysisLexicons:EmotionalFile"] ?? "emotional_ru.txt";
+        var manipulativeFile = configuration["AnalysisLexicons:ManipulativeFile"] ?? "manipulative_ru.txt";
+        var evaluativeFile = configuration["AnalysisLexicons:EvaluativeFile"] ?? "evaluative_ru.txt";
+        var sourceCuesFile = configuration["AnalysisLexicons:SourceCuesFile"] ?? "source_cues_ru.txt";
+
+        var cacheKey = string.Join('|', root, emotionalFile, manipulativeFile, evaluativeFile, sourceCuesFile);
+        return LexiconCache.GetOrAdd(cacheKey, _ => new Lexicons(
+            LoadEmotionalLexicons(root, emotionalFile),
+            ReadLexicon(Path.Combine(root, manipulativeFile)),
+            ReadLexicon(Path.Combine(root, evaluativeFile)),
+            ReadLexicon(Path.Combine(root, sourceCuesFile))));
     }
 
     /// <summary>
     /// Основной эмоциональный словарь + опциональный emotional_ru_rusentilex.txt (см. python/tools/build_lexicons.py).
     /// </summary>
-    private HashSet<string> LoadEmotionalLexicons(string root)
+    private static HashSet<string> LoadEmotionalLexicons(string root, string mainName)
     {
-        var mainName = configuration["AnalysisLexicons:EmotionalFile"] ?? "emotional_ru.txt";
         var merged = ReadLexicon(Path.Combine(root, mainName));
         var extraPath = Path.Combine(root, "emotional_ru_rusentilex.txt");
         if (File.Exists(extraPath))
@@ -1053,6 +1054,11 @@ public partial class NewsAnalysisService(
     {
         var relativePath = configuration["AnalysisScoring:WeightsFile"] ?? "Resources/Scoring/feature_weights.json";
         var absolutePath = Path.Combine(env.ContentRootPath, relativePath);
+        return WeightCache.GetOrAdd(absolutePath, CreateWeights);
+    }
+
+    private static FeatureWeights CreateWeights(string absolutePath)
+    {
         if (!File.Exists(absolutePath))
         {
             return FeatureWeights.Default;

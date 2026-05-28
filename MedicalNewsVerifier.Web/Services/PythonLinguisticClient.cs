@@ -26,13 +26,13 @@ public class PythonLinguisticClient(IConfiguration configuration, IWebHostEnviro
         var startInfo = new ProcessStartInfo
         {
             FileName = pythonExe,
-            Arguments = $"\"{scriptPath}\"",
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        startInfo.ArgumentList.Add(scriptPath);
         startInfo.Environment["MEDNEWS_LEXICON_ROOT"] = lexiconRoot;
 
         if (configuration.GetValue<bool>("Python:EnableNatasha"))
@@ -62,11 +62,17 @@ public class PythonLinguisticClient(IConfiguration configuration, IWebHostEnviro
         try
         {
             await process.StandardInput.WriteAsync(text);
+            await process.StandardInput.FlushAsync();
             process.StandardInput.Close();
 
-            var output = await process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-            var error = await process.StandardError.ReadToEndAsync(timeoutCts.Token);
-            await process.WaitForExitAsync(timeoutCts.Token);
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            var waitTask = process.WaitForExitAsync(timeoutCts.Token);
+
+            await Task.WhenAll(outputTask, errorTask, waitTask);
+
+            var output = await outputTask;
+            var error = await errorTask;
 
             if (process.ExitCode != 0)
             {

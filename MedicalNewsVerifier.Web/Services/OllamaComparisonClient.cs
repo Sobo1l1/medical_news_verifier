@@ -169,8 +169,11 @@ public sealed partial class OllamaComparisonClient(
 
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Post, "chat/completions");
-            req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            var requestBody = JsonSerializer.Serialize(payload, JsonOptions);
+            using var req = new HttpRequestMessage(HttpMethod.Post, "chat/completions")
+            {
+                Content = new StringContent(requestBody, Encoding.UTF8, "application/json")
+            };
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             using var response = await httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -186,23 +189,31 @@ public sealed partial class OllamaComparisonClient(
                 };
             }
 
-            logger.LogInformation("Ollama full response body: {Body}", body);
-
+            logger.LogDebug("Ollama response body length={Length}", body.Length);
             using var doc = JsonDocument.Parse(body);
-            var messageObj = doc.RootElement.GetProperty("choices")[0].GetProperty("message");
-            
-            // Пытаемся получить content, если пуст — ищем reasoning
-            var content = messageObj.GetProperty("content").GetString() ?? "";
-            
-            // Если content пуст, пробуем reasoning (некоторые модели туда вывалят ответ)
+
+            if (!doc.RootElement.TryGetProperty("choices", out var choices) ||
+                choices.GetArrayLength() == 0 ||
+                !choices[0].TryGetProperty("message", out var messageObj))
+            {
+                logger.LogWarning("Ollama: некорректная структура ответа");
+                return new OllamaComparisonOutcome
+                {
+                    WasAttempted = true,
+                    Succeeded = false,
+                    ErrorMessage = "Ollama вернула некорректную структуру ответа."
+                };
+            }
+
+            var content = messageObj.TryGetProperty("content", out var contentProp)
+                ? contentProp.GetString() ?? string.Empty
+                : string.Empty;
+
             if (string.IsNullOrWhiteSpace(content) && messageObj.TryGetProperty("reasoning", out var reasoningProp))
             {
-                var reasoning = reasoningProp.GetString() ?? "";
-                logger.LogWarning("Ollama: content пуст, используем reasoning поле (длина {Length})", reasoning.Length);
-                content = reasoning;
+                content = reasoningProp.GetString() ?? string.Empty;
+                logger.LogWarning("Ollama: content пуст, используем reasoning поле (длина {Length})", content.Length);
             }
-            
-            logger.LogInformation("Ollama raw response (content field): Length={Length}, Content={Content}", content.Length, content.Length > 200 ? content[..200] : content);
 
             var parsed = ParseModelJson(content);
             if (parsed is null)
@@ -218,14 +229,13 @@ public sealed partial class OllamaComparisonClient(
                 };
             }
 
-            var score = parsed.AlignmentScore;
+            int? score = parsed.AlignmentScore;
             if (score.HasValue)
             {
                 score = Math.Clamp(score.Value, 0, 100);
             }
 
             var summary = parsed.Summary?.Trim();
-            // Дополнительная подстраховка: обрезаем summary до 3500 символов на случай, если модель не соблюдала max_tokens
             if (summary?.Length > 3500)
             {
                 summary = summary[..3497] + "…";

@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Text.RegularExpressions;
 using MedicalNewsVerifier.Web.Models;
@@ -14,48 +15,57 @@ public partial class OfficialSourceFetcher(
         var urls = configuration.GetSection("OfficialSources:Urls").Get<string[]>() ?? [];
         var timeoutSeconds = configuration.GetValue<int?>("OfficialSources:TimeoutSeconds") ?? 8;
 
-        var result = new List<OfficialPublication>();
-        foreach (var url in urls.Where(u => !string.IsNullOrWhiteSpace(u)))
+        var tasks = urls
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Select(url => FetchOfficialPublicationAsync(url!, timeoutSeconds, cancellationToken));
+
+        var results = await Task.WhenAll(tasks);
+        return results.Where(r => r is not null).Select(r => r!).ToList();
+    }
+
+    private async Task<OfficialPublication?> FetchOfficialPublicationAsync(
+        string url,
+        int timeoutSeconds,
+        CancellationToken cancellationToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        try
         {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-
-            try
+            using var response = await httpClient.GetAsync(url, timeoutCts.Token);
+            if (!response.IsSuccessStatusCode)
             {
-                using var response = await httpClient.GetAsync(url, timeoutCts.Token);
-                if (!response.IsSuccessStatusCode)
-                {
-                    logger.LogWarning("Source {Url} returned status {Status}", url, response.StatusCode);
-                    continue;
-                }
+                logger.LogWarning("Source {Url} returned status {Status}", url, response.StatusCode);
+                return null;
+            }
 
-                var html = await response.Content.ReadAsStringAsync(timeoutCts.Token);
-                var content = CompactText(StripHtmlRegex().Replace(html, " "));
-                if (content.Length < 120)
-                {
-                    continue;
-                }
+            var html = await response.Content.ReadAsStringAsync(timeoutCts.Token);
+            var content = CompactText(StripHtmlRegex().Replace(html, " "));
+            if (content.Length < 120)
+            {
+                return null;
+            }
 
-                result.Add(new OfficialPublication
-                {
-                    SourceName = GetSourceName(url),
-                    Title = ExtractTitle(html),
-                    Url = url,
-                    Content = content[..Math.Min(content.Length, 5000)],
-                    PublishedAtUtc = DateTime.UtcNow
-                });
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            return new OfficialPublication
             {
-                logger.LogWarning("Timeout while fetching official source {Url}", url);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to fetch official source {Url}", url);
-            }
+                SourceName = GetSourceName(url),
+                Title = ExtractTitle(html),
+                Url = url,
+                Content = content[..Math.Min(content.Length, 5000)],
+                PublishedAtUtc = DateTime.UtcNow
+            };
         }
-
-        return result;
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning("Timeout while fetching official source {Url}", url);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to fetch official source {Url}", url);
+            return null;
+        }
     }
 
     private static string ExtractTitle(string html)
