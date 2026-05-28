@@ -109,7 +109,6 @@ public sealed partial class OllamaComparisonClient(
             - Кратко.
             - 1-3 предложения.
             - Без markdown.
-            - Без кавычек внутри текста.
             - Описывать только вывод проверки.
 
             ТРЕБОВАНИЯ К flags:
