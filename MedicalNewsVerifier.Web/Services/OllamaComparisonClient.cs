@@ -14,7 +14,7 @@ public sealed class OllamaOptions
     public string BaseUrl { get; set; } = "http://localhost:11434/v1";
     public string Model { get; set; } = "qwen3.5:9b";
     public int TimeoutSeconds { get; set; } = 120;
-    public int MaxCorpusCharsPerSnippet { get; set; } = 1200;
+    public int MaxCorpusCharsPerSnippet { get; set; } = 2200;
     public int MaxCorpusSnippets { get; set; } = 4;
     /// <summary>Максимальное число токенов в ответе от модели. По умолчанию ~2000 токенов ≈ 5-6 КБ текста.</summary>
     public int MaxResponseTokens { get; set; } = 2000;

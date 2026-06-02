@@ -218,7 +218,6 @@ public partial class NewsAnalysisService(
             heuristicScore,
             llmOutcome,
             combinedScore,
-            status,
             fragments,
             matches,
             lexical,
@@ -244,7 +243,6 @@ public partial class NewsAnalysisService(
         int heuristicScore,
         OllamaComparisonOutcome llmOutcome,
         int combinedScore,
-        VerificationStatus status,
         List<SuspiciousFragment> fragments,
         List<OfficialPublicationMatchVm> matches,
         LexicalFeatures lexical,
@@ -259,7 +257,6 @@ public partial class NewsAnalysisService(
             LlmAlignmentScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null,
             LlmSummary = BuildLlmSummaryLine(llmOutcome),
             ReliabilityScore = combinedScore,
-            Status = status,
             Explanation = BuildExplanation(
                 combinedScore,
                 heuristicScore,
@@ -358,7 +355,10 @@ public partial class NewsAnalysisService(
         if (fromWeb.Count == 0)
         {
             logger.LogInformation("No web sources fetched, fallback to database source list");
-            fromWeb = await db.OfficialPublications.AsNoTracking().ToListAsync(cancellationToken);
+            fromWeb = await db.OfficialPublications
+                .Include(p => p.OfficialSource)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
         }
 
         return fromWeb;

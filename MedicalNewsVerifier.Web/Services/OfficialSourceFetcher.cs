@@ -49,7 +49,7 @@ public partial class OfficialSourceFetcher(
 
             return new OfficialPublication
             {
-                SourceName = GetSourceName(url),
+                OfficialSource = new OfficialSource { Name = GetSourceName(url) },
                 Title = ExtractTitle(html),
                 Url = url,
                 Content = content[..Math.Min(content.Length, 5000)],

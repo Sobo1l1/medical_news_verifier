@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace MedicalNewsVerifier.Web.Models;
 
@@ -6,8 +7,12 @@ public class OfficialPublication
 {
     public int Id { get; set; }
 
-    [MaxLength(250)]
-    public string SourceName { get; set; } = string.Empty;
+    public int OfficialSourceId { get; set; }
+
+    public OfficialSource? OfficialSource { get; set; }
+
+    [NotMapped]
+    public string SourceName => OfficialSource?.Name ?? string.Empty;
 
     [MaxLength(500)]
     public string Title { get; set; } = string.Empty;

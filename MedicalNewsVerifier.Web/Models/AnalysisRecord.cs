@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace MedicalNewsVerifier.Web.Models;
 
@@ -15,7 +16,7 @@ public class AnalysisRecord
     [MaxLength(500)]
     public string? SourceUrl { get; set; }
 
-    /// <summary>Итоговая (комбинированная) оценка 0–100, по ней же вычисляется <see cref="Status"/>.</summary>
+    /// <summary>Итоговая (комбинированная) оценка 0–100, по которой определяется статус.</summary>
     public int ReliabilityScore { get; set; }
 
     /// <summary>Оценка эвристики (лексика, Python, совпадения с корпусом).</summary>
@@ -27,7 +28,13 @@ public class AnalysisRecord
     [MaxLength(8000)]
     public string? LlmSummary { get; set; }
 
-    public VerificationStatus Status { get; set; }
+    [NotMapped]
+    public VerificationStatus Status => ReliabilityScore switch
+    {
+        >= 70 => VerificationStatus.LikelyReliable,
+        <= 40 => VerificationStatus.Suspicious,
+        _ => VerificationStatus.NeedsReview
+    };
 
     [MaxLength(8000)]
     public string Explanation { get; set; } = string.Empty;
