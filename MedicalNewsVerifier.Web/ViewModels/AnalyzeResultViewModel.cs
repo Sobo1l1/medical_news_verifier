@@ -21,6 +21,7 @@ public class AnalyzeResultViewModel
 
 public class OfficialPublicationMatchVm
 {
+    public int OfficialPublicationId { get; set; }
     public string SourceName { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string Url { get; set; } = string.Empty;

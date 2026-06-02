@@ -1,51 +1,265 @@
-@model IReadOnlyList<MedicalNewsVerifier.Web.Models.AnalysisRecord>
+@model HistoryFilterViewModel
+
 @{
     ViewData["Title"] = "История проверок";
 }
 
-<h2 class="mb-3">История последних проверок</h2>
+<div class="container-fluid mt-4">
+    <h2 class="mb-4">История проверок достоверности новостей</h2>
 
-@if (Model.Count == 0)
-{
-    <p class="text-muted">Проверок пока нет.</p>
-}
-else
-{
-    <div class="table-responsive">
-        <table class="table table-striped align-middle">
-            <thead>
-                <tr>
-                    <th>Дата (UTC)</th>
-                    <th>Заголовок</th>
-                    <th>Оценка</th>
-                    <th>Статус</th>
-                    <th>Фрагменты</th>
-                    <th>Действия</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var item in Model)
-                {
-                    <tr>
-                        <td>@item.CreatedAtUtc.ToString("yyyy-MM-dd HH:mm")</td>
-                        <td>@item.Headline</td>
-                        <td>@item.ReliabilityScore/100</td>
-                        <td>@item.Status</td>
-                        <td>@item.SuspiciousFragments.Count</td>
-                        <td>
-                            <a class="btn btn-sm btn-outline-primary me-1" asp-controller="Home" asp-action="Details" asp-route-id="@item.Id">Открыть</a>
-                            <form asp-action="Delete" method="post" class="d-inline">
-                                @Html.AntiForgeryToken()
-                                <input type="hidden" name="id" value="@item.Id" />
-                                <button type="submit" class="btn btn-sm btn-outline-danger"
-                                        onclick="return confirm('Удалить проверку из истории?');">
-                                    Удалить
-                                </button>
-                            </form>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+    <!-- Статистика -->
+    <div class="row mb-4 g-3">
+        <div class="col-md-3">
+            <div class="card text-center border-primary">
+                <div class="card-body">
+                    <h6 class="card-title text-muted">Всего проверок</h6>
+                    <h3 class="text-primary">@Model.TotalCount</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-danger">
+                <div class="card-body">
+                    <h6 class="card-title text-muted">Подозрительные</h6>
+                    <h3 class="text-danger">@Model.SuspiciousCount</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-warning">
+                <div class="card-body">
+                    <h6 class="card-title text-muted">Требуют проверки</h6>
+                    <h3 class="text-warning">@Model.NeedsReviewCount</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-success">
+                <div class="card-body">
+                    <h6 class="card-title text-muted">Достоверные</h6>
+                    <h3 class="text-success">@Model.LikelyReliableCount</h3>
+                </div>
+            </div>
+        </div>
     </div>
-}
+
+    @if (Model.TotalCount > 0)
+    {
+        <div class="alert alert-info">
+            <strong>Средняя оценка:</strong> @Model.AverageScore.ToString("F1")/100
+        </div>
+    }
+
+    <!-- Фильтры -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-light">
+            <h5 class="mb-0">🔍 Фильтры поиска</h5>
+        </div>
+        <div class="card-body">
+            <form method="get" class="row g-3" asp-action="History">
+                <div class="col-md-3">
+                    <label class="form-label">Поиск по заголовку</label>
+                    <input type="text" class="form-control" name="search" value="@Model.SearchText" placeholder="Введите текст..." />
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label">Статус</label>
+                    <select class="form-select" name="status">
+                        <option value="">— Все —</option>
+                        <option value="2" selected="@(Model.StatusFilter == VerificationStatus.Suspicious)">🔴 Подозрительные</option>
+                        <option value="1" selected="@(Model.StatusFilter == VerificationStatus.NeedsReview)">🟡 Требуют проверки</option>
+                        <option value="0" selected="@(Model.StatusFilter == VerificationStatus.LikelyReliable)">🟢 Достоверные</option>
+                    </select>
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label">Оценка от</label>
+                    <input type="number" class="form-control" name="minScore" value="@Model.MinScore" min="0" max="100" placeholder="0" />
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label">Оценка до</label>
+                    <input type="number" class="form-control" name="maxScore" value="@Model.MaxScore" min="0" max="100" placeholder="100" />
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label">От даты</label>
+                    <input type="date" class="form-control" name="dateFrom" value="@Model.DateFrom?.ToString("yyyy-MM-dd")" />
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label">До даты</label>
+                    <input type="date" class="form-control" name="dateTo" value="@Model.DateTo?.ToString("yyyy-MM-dd")" />
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label">Сортировка</label>
+                    <select class="form-select" name="sortBy">
+                        <option value="DateDesc" selected="@(Model.SortBy == "DateDesc")">📅 Свежие первыми</option>
+                        <option value="DateAsc" selected="@(Model.SortBy == "DateAsc")">📅 Старые первыми</option>
+                        <option value="ScoreDesc" selected="@(Model.SortBy == "ScoreDesc")">📈 Высокая оценка</option>
+                        <option value="ScoreAsc" selected="@(Model.SortBy == "ScoreAsc")">📉 Низкая оценка</option>
+                        <option value="HeadlineAsc" selected="@(Model.SortBy == "HeadlineAsc")">🔤 По заголовку (A-Z)</option>
+                    </select>
+                </div>
+
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Применить фильтры
+                    </button>
+                    <a href="/Home/History" class="btn btn-secondary">
+                        <i class="bi bi-arrow-clockwise"></i> Сбросить
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Таблица результатов -->
+    @if (Model.Records.Any())
+    {
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <h6 class="mb-0">📋 Результаты (@Model.PageNumber of @Model.TotalPages)</h6>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 40%;">Заголовок</th>
+                                <th style="width: 10%;">Оценка</th>
+                                <th style="width: 12%;">Статус</th>
+                                <th style="width: 10%;">Дата</th>
+                                <th style="width: 8%;">Фрагм.</th>
+                                <th style="width: 20%;">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var record in Model.Records)
+                            {
+                                var statusClass = record.Status switch
+                                {
+                                    VerificationStatus.Suspicious => "danger",
+                                    VerificationStatus.NeedsReview => "warning",
+                                    _ => "success"
+                                };
+                                var statusEmoji = record.Status switch
+                                {
+                                    VerificationStatus.Suspicious => "🔴",
+                                    VerificationStatus.NeedsReview => "🟡",
+                                    _ => "🟢"
+                                };
+                                var statusText = record.Status switch
+                                {
+                                    VerificationStatus.Suspicious => "Подозрительна",
+                                    VerificationStatus.NeedsReview => "Требует проверки",
+                                    _ => "Достоверна"
+                                };
+
+                                <tr>
+                                    <td>
+                                        <strong>
+                                            @if (record.Headline.Length > 50)
+                                            {
+                                                @(record.Headline.Substring(0, 47) + "…")
+                                            }
+                                            else
+                                            {
+                                                @record.Headline
+                                            }
+                                        </strong>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary fs-6">@record.ReliabilityScore/100</span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-@statusClass">@statusEmoji @statusText</span>
+                                    </td>
+                                    <td class="small text-muted">
+                                        @record.CreatedAtUtc.ToString("dd.MM.yyyy HH:mm")
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="badge bg-info">@record.SuspiciousFragments.Count</span>
+                                    </td>
+                                    <td>
+                                        <a href="/Home/Details/@record.Id" class="btn btn-sm btn-outline-primary" title="Просмотреть детали">
+                                            👁️ Просмотр
+                                        </a>
+                                        <form method="post" action="/Home/Delete" style="display:inline;">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="id" value="@record.Id" />
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить проверку из истории?');" title="Удалить">
+                                                🗑️ Удалить
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Пагинация -->
+        @if (Model.TotalPages > 1)
+        {
+            <nav class="mt-4" aria-label="Навигация по страницам">
+                <ul class="pagination justify-content-center">
+                    @if (Model.PageNumber > 1)
+                    {
+                        <li class="page-item">
+                            <a class="page-link" href="?page=1&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">⬅️ Первая</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?page=@(Model.PageNumber - 1)&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">← Предыдущая</a>
+                        </li>
+                    }
+
+                    @for (int i = Math.Max(1, Model.PageNumber - 2); i <= Math.Min(Model.TotalPages, Model.PageNumber + 2); i++)
+                    {
+                        <li class="page-item @(i == Model.PageNumber ? "active" : "")">
+                            <a class="page-link" href="?page=@i&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">@i</a>
+                        </li>
+                    }
+
+                    @if (Model.PageNumber < Model.TotalPages)
+                    {
+                        <li class="page-item">
+                            <a class="page-link" href="?page=@(Model.PageNumber + 1)&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">Следующая →</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?page=@Model.TotalPages&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">Последняя ➡️</a>
+                        </li>
+                    }
+                </ul>
+            </nav>
+        }
+    }
+    else
+    {
+        <div class="alert alert-info">
+            ℹ️ Нет результатов, соответствующих выбранным фильтрам.
+        </div>
+    }
+</div>
+
+<style>
+    .card {
+        border: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    .badge {
+        padding: 0.35em 0.65em;
+    }
+
+    table tbody tr:hover {
+        background-color: rgba(0, 123, 255, 0.05);
+    }
+
+    .btn-outline-primary:hover {
+        transform: scale(1.05);
+        transition: all 0.2s;
+    }
+</style>

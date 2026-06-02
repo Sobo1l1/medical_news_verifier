@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace MedicalNewsVerifier.Web.Models;
 
@@ -9,7 +10,15 @@ public class SuspiciousFragment
     /// <summary>
     /// Классификация признака для цветовой подсветки и hover.
     /// </summary>
-    public SuspiciousFeatureKind FeatureKind { get; set; }
+    [Column("FeatureKind")]
+    public int FeatureKindId { get; set; }
+
+    [NotMapped]
+    public SuspiciousFeatureKind FeatureKind
+    {
+        get => (SuspiciousFeatureKind)FeatureKindId;
+        set => FeatureKindId = (int)value;
+    }
 
     /// <summary>
     /// Начало фрагмента в объединённом тексте заголовка и новости (0-based). -1 если привязка к тексту не задана.
@@ -32,4 +41,6 @@ public class SuspiciousFragment
     public int AnalysisRecordId { get; set; }
 
     public AnalysisRecord? AnalysisRecord { get; set; }
+
+    public SuspiciousFeatureKindDefinition? FeatureKindDefinition { get; set; }
 }

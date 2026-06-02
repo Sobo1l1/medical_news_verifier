@@ -9,6 +9,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SuspiciousFragment> SuspiciousFragments => Set<SuspiciousFragment>();
     public DbSet<OfficialPublication> OfficialPublications => Set<OfficialPublication>();
     public DbSet<OfficialSource> OfficialSources => Set<OfficialSource>();
+    public DbSet<OfficialPublicationMatch> OfficialPublicationMatches => Set<OfficialPublicationMatch>();
+    public DbSet<SuspiciousFeatureKindDefinition> SuspiciousFeatureKindDefinitions => Set<SuspiciousFeatureKindDefinition>();
     public DbSet<TrustedSource> TrustedSources => Set<TrustedSource>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -19,6 +21,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasForeignKey(f => f.AnalysisRecordId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        modelBuilder.Entity<AnalysisRecord>()
+            .HasMany(r => r.OfficialPublicationMatches)
+            .WithOne(m => m.AnalysisRecord)
+            .HasForeignKey(m => m.AnalysisRecordId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<OfficialPublicationMatch>()
+            .HasOne(m => m.OfficialPublication)
+            .WithMany()
+            .HasForeignKey(m => m.OfficialPublicationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         modelBuilder.Entity<OfficialPublication>()
             .HasOne(p => p.OfficialSource)
             .WithMany(s => s.Publications)
@@ -28,5 +42,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<OfficialSource>()
             .HasIndex(s => s.Name)
             .IsUnique();
+
+        modelBuilder.Entity<SuspiciousFragment>()
+            .HasOne(f => f.FeatureKindDefinition)
+            .WithMany()
+            .HasForeignKey(f => f.FeatureKindId);
     }
 }

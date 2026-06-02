@@ -12,6 +12,8 @@ public static class DatabaseSchemaPatcher
         ApplySuspiciousFragmentMarkupColumns(db);
         ApplyAnalysisRecordNewsTextLength(db);
         ApplyOfficialSourcesTable(db);
+        ApplySuspiciousFeatureKindDefinitionsTable(db);
+        ApplyOfficialPublicationMatchesTable(db);
         ApplyTrustedSourcesTable(db);
         ApplyAnalysisRecordLlmColumns(db);
     }
@@ -150,6 +152,83 @@ public static class DatabaseSchemaPatcher
                 """);
             db.Database.ExecuteSqlRaw(
                 """ALTER TABLE "OfficialPublications" ALTER COLUMN "OfficialSourceId" SET NOT NULL;""");
+        }
+        catch
+        {
+            // Игнорируем: при отсутствии прав или нестандартной схеме приложение всё равно должно стартовать.
+        }
+    }
+
+    public static void ApplySuspiciousFeatureKindDefinitionsTable(AppDbContext db)
+    {
+        if (db.Database.ProviderName is null ||
+            !db.Database.ProviderName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            db.Database.ExecuteSqlRaw(
+                """
+                CREATE TABLE IF NOT EXISTS "SuspiciousFeatureKindDefinitions" (
+                    "Id" integer PRIMARY KEY,
+                    "Code" character varying(100) NOT NULL,
+                    "Title" character varying(200) NOT NULL,
+                    "Description" character varying(400) NOT NULL,
+                    "CssToken" character varying(50) NOT NULL
+                );
+                """);
+            db.Database.ExecuteSqlRaw(
+                """
+                INSERT INTO "SuspiciousFeatureKindDefinitions" ("Id", "Code", "Title", "Description", "CssToken")
+                VALUES
+                    (1, 'Emotional', 'Эмоционально окрашенная лексика', 'Текст содержит эмоциональную окраску и призван влиять на чувства.', 'emotional'),
+                    (2, 'Manipulative', 'Манипулятивные выражения', 'Выкристаллизованные словоформы, направленные на управление восприятием.', 'manipulative'),
+                    (3, 'Evaluative', 'Оценочная лексика', 'Слова с оценкой, создающие субъективное впечатление.', 'evaluative'),
+                    (4, 'UppercaseWord', 'Слова в верхнем регистре', 'Слова или фразы, полностью написанные заглавными буквами.', 'uppercase'),
+                    (5, 'Exclamation', 'Восклицательные знаки', 'Восклицательные знаки, усиливающие эмоциональность.', 'exclamation'),
+                    (6, 'Question', 'Вопросительные знаки', 'Вопросы, побуждающие к сомнению или уточнению.', 'question'),
+                    (7, 'Link', 'Ссылки', 'Адреса и гиперссылки в тексте.', 'source'),
+                    (8, 'Date', 'Даты', 'Упоминания дат и временных меток.', 'date'),
+                    (9, 'Number', 'Числовые данные', 'Числа и количественные обозначения.', 'number'),
+                    (10, 'SourceCue', 'Указание на источник', 'Упоминания источников и ссылок на авторитеты.', 'source'),
+                    (11, 'PythonHeuristic', 'Формулировки повышенного риска', 'Признаки, обнаруженные дополнительным Python-модулем.', 'python')
+                ON CONFLICT ("Id") DO NOTHING;
+                """);
+        }
+        catch
+        {
+            // Игнорируем: при отсутствии прав или нестандартной схеме приложение всё равно должно стартовать.
+        }
+    }
+
+    public static void ApplyOfficialPublicationMatchesTable(AppDbContext db)
+    {
+        if (db.Database.ProviderName is null ||
+            !db.Database.ProviderName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            db.Database.ExecuteSqlRaw(
+                """
+                CREATE TABLE IF NOT EXISTS "OfficialPublicationMatches" (
+                    "Id" serial PRIMARY KEY,
+                    "AnalysisRecordId" integer NOT NULL,
+                    "OfficialPublicationId" integer NOT NULL,
+                    "RelevanceScore" integer NOT NULL,
+                    "MatchedAtUtc" timestamp with time zone NOT NULL DEFAULT now(),
+                    CONSTRAINT "FK_OfficialPublicationMatches_AnalysisRecords" FOREIGN KEY ("AnalysisRecordId") REFERENCES "AnalysisRecords" ("Id") ON DELETE CASCADE,
+                    CONSTRAINT "FK_OfficialPublicationMatches_OfficialPublications" FOREIGN KEY ("OfficialPublicationId") REFERENCES "OfficialPublications" ("Id") ON DELETE RESTRICT
+                );
+                """);
+            db.Database.ExecuteSqlRaw(
+                """CREATE INDEX IF NOT EXISTS "IX_OfficialPublicationMatches_AnalysisRecordId" ON "OfficialPublicationMatches" ("AnalysisRecordId");""");
+            db.Database.ExecuteSqlRaw(
+                """CREATE INDEX IF NOT EXISTS "IX_OfficialPublicationMatches_OfficialPublicationId" ON "OfficialPublicationMatches" ("OfficialPublicationId");""");
         }
         catch
         {

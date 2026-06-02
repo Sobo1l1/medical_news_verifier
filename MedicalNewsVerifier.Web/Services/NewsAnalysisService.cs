@@ -265,7 +265,13 @@ public partial class NewsAnalysisService(
                 matches.Count,
                 lexical,
                 pythonOutcome),
-            SuspiciousFragments = fragments
+            SuspiciousFragments = fragments,
+            OfficialPublicationMatches = matches.Select(match => new OfficialPublicationMatch
+            {
+                OfficialPublicationId = match.OfficialPublicationId,
+                RelevanceScore = match.RelevanceScore,
+                MatchedAtUtc = DateTime.UtcNow
+            }).ToList()
         };
     }
 
@@ -389,6 +395,7 @@ public partial class NewsAnalysisService(
         pubs
             .Select(o => new OfficialPublicationMatchVm
             {
+                OfficialPublicationId = o.Id,
                 SourceName = o.SourceName,
                 Title = o.Title,
                 Url = o.Url,

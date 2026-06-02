@@ -86,6 +86,28 @@
             <div class="card shadow-sm">
                 <div class="card-body">
                     <h4 class="mb-3">Результат анализа</h4>
+
+                    <!-- Кнопки действий -->
+                    <div class="mb-3 d-flex flex-wrap gap-2">
+                        <form method="post" action="/Home/ExportPdf" style="display:inline;">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="id" value="@Model.LastAnalysis.Id" />
+                            <button type="submit" class="btn btn-success btn-sm">
+                                <i class="bi bi-download"></i> Скачать PDF
+                            </button>
+                        </form>
+                        <form method="post" action="/Home/ExportJson" style="display:inline;">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="id" value="@Model.LastAnalysis.Id" />
+                            <button type="submit" class="btn btn-info btn-sm">
+                                <i class="bi bi-file-code"></i> JSON
+                            </button>
+                        </form>
+                        <a href="/Home/Details/@Model.LastAnalysis.Id" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-link"></i> Постоянная ссылка
+                        </a>
+                    </div>
+
                     @if (Model.OpenedFromHistory)
                     {
                         <div class="alert alert-info py-2">

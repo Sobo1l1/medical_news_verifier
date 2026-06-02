@@ -42,4 +42,6 @@ public class AnalysisRecord
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
     public List<SuspiciousFragment> SuspiciousFragments { get; set; } = [];
+
+    public List<OfficialPublicationMatch> OfficialPublicationMatches { get; set; } = [];
 }
