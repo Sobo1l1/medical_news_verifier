@@ -103,16 +103,25 @@ public sealed partial class OllamaComparisonClient(
             2) Предварительная оценка новости по общепринятым медицинским знаниям — даже если корпус пуст или не по теме. Явно пометь, что это экспертная оценка модели, а не цитата из корпуса.
             Итог: пользователь всегда получает и вывод по корпусу, и осторожный медицинский комментарий.
 
-            alignmentScore (0–100): согласованность новости с корпусом; при слабом корпусе опирайся на п.2, но снижай уверенность (обычно 35–65, не выше 75 без подтверждений).
+            alignmentScore (0–100) — оценка ДОСТОВЕРНОСТИ и согласованности новости с корпусом и медицинским консенсусом:
+            - 75–100: тезисы новости подтверждаются корпусом или не противоречат ему и общепринятой медицине.
+            - 45–74: частичное совпадение или неоднозначность; нужна дополнительная проверка фактов.
+            - 20–44: существенные пробелы, преувеличения или слабая опора на источники.
+            - 0–19: явные противоречия корпусу/медицинским знаниям, мифы, конспирология, дезинформация.
+
+            Важно: если корпус не обсуждает тему новости, но по общим медицинским знаниям утверждения новости ложны или вредны — ставь 0–25, а не средние 35–65. Средние баллы (35–65) только когда новость в целом правдоподобна, но корпус её не покрывает.
 
             Верни строго один JSON-объект (без markdown):
             {"alignmentScore":0-100,"summary":"...","flags":["snake_case"]}
 
-            Пример при слабом корпусе:
-            {"alignmentScore":52,"summary":"В выдержках корпуса нет статистики по теме новости, только общие сведения об источнике. С учётом общих медицинских знаний рекомендации в новости звучат правдоподобно, но цифры и региональные данные нужно сверить с официальной отчётностью.","flags":["insufficient_corpus","requires_verification"]}
+            Пример: корпус не по теме, но новость правдоподобна:
+            {"alignmentScore":52,"summary":"В выдержках корпуса нет статистики по теме новости. С учётом общих медицинских знаний рекомендации звучат правдоподобно, но цифры нужно сверить с официальной отчётностью.","flags":["insufficient_corpus","requires_verification"]}
 
-            Пример при релевантном корпусе:
-            {"alignmentScore":78,"summary":"Корпус подтверждает ключевые тезисы о профилактике. Формулировки новости в целом согласуются с официальными рекомендациями.","flags":["accurate"]}
+            Пример: корпус подтверждает новость:
+            {"alignmentScore":82,"summary":"Корпус подтверждает ключевые тезисы о профилактике. Формулировки согласуются с официальными рекомендациями.","flags":["accurate"]}
+
+            Пример: новость противоречит корпусу и медицинским знаниям:
+            {"alignmentScore":12,"summary":"Корпус содержит официальные рекомендации по профилактике ОРВИ; утверждения новости о вреде вакцин и конспирологические тезисы им не соответствуют и противоречат медицинскому консенсусу.","flags":["unsupported_claims","possible_contradiction"]}
 
             flags: insufficient_corpus, requires_verification, possible_contradiction, unsupported_claims, accurate.
             """;
@@ -145,14 +154,23 @@ public sealed partial class OllamaComparisonClient(
                 };
             }
 
+            var normalizedSummary = NormalizeSummary(parsed.Summary);
             int? score = parsed.AlignmentScore;
             if (score.HasValue)
             {
-                score = Math.Clamp(score.Value, 0, 100);
+                var raw = Math.Clamp(score.Value, 0, 100);
+                score = CalibrateAlignmentScore(raw, parsed.Flags, normalizedSummary);
+                if (score != raw)
+                {
+                    logger.LogInformation(
+                        "Ollama: alignmentScore скорректирован {Raw} → {Adjusted} (flags/summary)",
+                        raw,
+                        score);
+                }
             }
 
             var summary = EnsureSubstantiveSummary(
-                NormalizeSummary(parsed.Summary),
+                normalizedSummary,
                 parsed.Flags,
                 score,
                 corpusIsWeak);
@@ -610,6 +628,46 @@ public sealed partial class OllamaComparisonClient(
     private static bool IsCorpusWeakForFactCheck(IReadOnlyList<OfficialPublication> corpus) =>
         corpus.Count == 0;
 
+    /// <summary>Согласует числовую оценку с флагами и негативными формулировками в summary (модель иногда завышает балл).</summary>
+    private static int CalibrateAlignmentScore(int score, List<string>? flags, string? summary)
+    {
+        var calibrated = score;
+
+        if (flags is not null)
+        {
+            var rejectsNews = flags.Any(f => string.Equals(f, "unsupported_claims", StringComparison.OrdinalIgnoreCase)
+                                             || string.Equals(f, "possible_contradiction", StringComparison.OrdinalIgnoreCase));
+            if (rejectsNews)
+            {
+                calibrated = Math.Min(calibrated, 28);
+            }
+            else if (flags.Any(f => string.Equals(f, "accurate", StringComparison.OrdinalIgnoreCase)))
+            {
+                calibrated = Math.Max(calibrated, 68);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary))
+        {
+            var lower = summary.ToLowerInvariant();
+            string[] strongRejection =
+            [
+                "конспиролог", "дезинформа", "миф", "несостоятельн", "недостоверн", "ложн",
+                "вводит в заблуждение", "не подкреплен", "противоречат", "опроверг", "антинауч"
+            ];
+
+            var rejectionHits = strongRejection.Count(m => lower.Contains(m, StringComparison.Ordinal));
+            calibrated = rejectionHits switch
+            {
+                >= 2 => Math.Min(calibrated, 18),
+                1 => Math.Min(calibrated, 30),
+                _ => calibrated
+            };
+        }
+
+        return Math.Clamp(calibrated, 0, 100);
+    }
+
     private static string? EnsureSubstantiveSummary(
         string? summary,
         List<string>? flags,
@@ -669,7 +727,7 @@ public sealed partial class OllamaComparisonClient(
             >= 70 =>
                 $"{prefix} основные рекомендации в новости выглядят правдоподобными и не противоречат типичной практике, однако без прямых подтверждений из корпуса вывод остаётся предварительным.",
             <= 40 =>
-                $"{prefix} в новости есть формулировки, которые могут вводить в заблуждение или требуют жёсткой проверки по первоисточникам; уверенность в достоверности низкая.",
+                $"{prefix} в новости есть формулировки, которые могут вводить в заблуждение или противоречат медицинскому консенсусу; уверенность в достоверности низкая.",
             _ =>
                 $"{prefix} часть тезисов звучит разумно, но конкретные цифры, региональная статистика и сильные утверждения нужно сверить с официальными публикациями."
         };

@@ -97,6 +97,19 @@ body {
   box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.22);
 }
 
+/* Краткое резюме Ollama — тот же приглушённый акцент, что у строки группы в разметке при наведении */
+.ollama-summary-block {
+  background-color: rgba(13, 110, 253, 0.08);
+  box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.22);
+  border-radius: 0.35rem;
+  padding: 0.75rem 1rem;
+}
+
+.ollama-summary-block--warning {
+  background-color: rgba(255, 193, 7, 0.12);
+  box-shadow: 0 0 0 1px rgba(255, 193, 7, 0.28);
+}
+
 .markup-legend-swatch {
   display: inline-block;
   width: 0.85rem;

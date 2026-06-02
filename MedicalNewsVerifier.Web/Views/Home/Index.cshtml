@@ -115,11 +115,9 @@
                                 : llmHasSummary
                                     ? "Ошибка"
                                     : "—";
-                            var llmSummaryAlertClass = llmHasResult
-                                ? "alert-light"
-                                : llmHasSummary
-                                    ? "alert-warning"
-                                    : "alert-light";
+                            var llmSummaryBlockClass = llmHasResult
+                                ? "ollama-summary-block"
+                                : "ollama-summary-block ollama-summary-block--warning";
                         }
                         <div class="col-sm-4">
                             <div class="border rounded p-2">
@@ -129,7 +127,7 @@
                         </div>
                         <div class="col-sm-4">
                             <div class="border rounded p-2">
-                                <div class="text-muted">Ollama</div>
+                                <div class="text-muted" title="Согласованность с корпусом и медицинским консенсусом">Ollama (достоверность)</div>
                                 <div class="fw-semibold">@llmStatusText</div>
                             </div>
                         </div>
@@ -142,9 +140,9 @@
                     </div>
                     @if (llmHasSummary)
                     {
-                        <div class="alert @llmSummaryAlertClass border small mb-3">
+                        <div class="@llmSummaryBlockClass small mb-3">
                             <div class="fw-semibold mb-1">Краткое резюме модели (Ollama)</div>
-                            <div class="text-break">@Model.LastAnalysis.LlmSummary</div>
+                            <div class="text-break mb-0">@Model.LastAnalysis.LlmSummary</div>
                         </div>
                     }
                     <div class="mb-3">
