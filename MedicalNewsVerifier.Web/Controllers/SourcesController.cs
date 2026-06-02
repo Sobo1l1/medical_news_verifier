@@ -46,4 +46,73 @@ public class SourcesController(AppDbContext db) : Controller
         TempData["Message"] = "Источник добавлен.";
         return RedirectToAction(nameof(Index));
     }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Edit([Bind(Prefix = "Edit")] TrustedSourceEditInputModel input, CancellationToken cancellationToken)
+    {
+        var source = await db.TrustedSources.FirstOrDefaultAsync(s => s.Id == input.Id, cancellationToken);
+        if (source is null)
+        {
+            TempData["Error"] = "Источник не найден.";
+            return RedirectToAction(nameof(Index));
+        }
+
+        if (!ModelState.IsValid)
+        {
+            var list = await db.TrustedSources.AsNoTracking()
+                .OrderBy(s => s.SortOrder).ThenBy(s => s.Name).ToListAsync(cancellationToken);
+            return View("Index", new SourcesPageViewModel { Items = list, Edit = input });
+        }
+
+        source.Name = input.Name.Trim();
+        source.BaseUrl = input.BaseUrl.Trim();
+        source.AccessedOnUtc = DateTimeUtc.ToPostgresUtc(input.AccessedOnUtc);
+        source.IsEnabled = input.IsEnabled;
+        source.SortOrder = input.SortOrder;
+
+        await db.SaveChangesAsync(cancellationToken);
+        TempData["Message"] = "Источник обновлён.";
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SetEnabled(int id, bool enabled, CancellationToken cancellationToken)
+    {
+        var source = await db.TrustedSources.FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+        if (source is null)
+        {
+            TempData["Error"] = "Источник не найден.";
+            return RedirectToAction(nameof(Index));
+        }
+
+        source.IsEnabled = enabled;
+        await db.SaveChangesAsync(cancellationToken);
+        TempData["Message"] = enabled ? "Источник включён." : "Источник отключён.";
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
+    {
+        var source = await db.TrustedSources.FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+        if (source is null)
+        {
+            TempData["Error"] = "Источник не найден.";
+            return RedirectToAction(nameof(Index));
+        }
+
+        if (await db.OfficialPublications.AnyAsync(p => p.TrustedSourceId == id, cancellationToken))
+        {
+            TempData["Error"] = "Нельзя удалить источник: в корпусе есть связанные материалы. Сначала удалите их.";
+            return RedirectToAction(nameof(Index));
+        }
+
+        db.TrustedSources.Remove(source);
+        await db.SaveChangesAsync(cancellationToken);
+        TempData["Message"] = "Источник удалён.";
+        return RedirectToAction(nameof(Index));
+    }
 }

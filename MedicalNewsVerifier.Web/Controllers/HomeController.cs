@@ -35,7 +35,7 @@ public class HomeController(ILogger<HomeController> logger, INewsAnalysisService
         return View("Index", vm);
     }
 
-    public async Task<IActionResult> Details(int id, CancellationToken cancellationToken)
+    public async Task<IActionResult> Details(int id, bool fromHistory = false, CancellationToken cancellationToken = default)
     {
         var record = await analysisService.GetAnalysisByIdAsync(id, cancellationToken);
         if (record is null)
@@ -54,8 +54,7 @@ public class HomeController(ILogger<HomeController> logger, INewsAnalysisService
             },
             LastAnalysis = record,
             OfficialMatches = matches,
-            IsFromHistory = true,
-            OpenedFromHistory = true
+            OpenedFromHistory = fromHistory
         };
         PopulateMarkup(vm, record);
         return View("Index", vm);

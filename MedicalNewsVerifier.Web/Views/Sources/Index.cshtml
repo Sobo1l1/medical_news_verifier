@@ -14,6 +14,10 @@
         {
             <div class="alert alert-success py-2">@msg</div>
         }
+        @if (TempData["Error"] is string err)
+        {
+            <div class="alert alert-danger py-2">@err</div>
+        }
 
         <div class="card shadow-sm mb-4">
             <div class="card-header">Добавить источник</div>
@@ -53,6 +57,7 @@
                         <th>URL</th>
                         <th>Дата обращения</th>
                         <th>Вкл.</th>
+                        <th style="width: 11rem;">Действия</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -63,7 +68,35 @@
                             <td>@s.Name</td>
                             <td><a href="@s.BaseUrl" target="_blank" rel="noopener">@s.BaseUrl</a></td>
                             <td>@(s.AccessedOnUtc?.ToString("yyyy-MM-dd") ?? "—")</td>
-                            <td>@(s.IsEnabled ? "да" : "нет")</td>
+                            <td>
+                                <form asp-action="SetEnabled" method="post" class="d-inline">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="id" value="@s.Id" />
+                                    <div class="form-check mb-0">
+                                        <input type="checkbox" name="enabled" value="true" class="form-check-input"
+                                               checked="@s.IsEnabled" onchange="this.form.submit()" title="Включить или отключить источник" />
+                                    </div>
+                                </form>
+                            </td>
+                            <td class="text-nowrap">
+                                <button type="button" class="btn btn-sm btn-outline-primary btn-edit-source"
+                                        data-id="@s.Id"
+                                        data-name="@s.Name"
+                                        data-base-url="@s.BaseUrl"
+                                        data-accessed="@(s.AccessedOnUtc?.ToString("yyyy-MM-ddTHH:mm") ?? "")"
+                                        data-enabled="@s.IsEnabled.ToString().ToLowerInvariant()"
+                                        data-sort-order="@s.SortOrder">
+                                    Изменить
+                                </button>
+                                <form asp-action="Delete" method="post" class="d-inline">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="id" value="@s.Id" />
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                                            onclick="return confirm('Удалить источник «@s.Name»?');">
+                                        Удалить
+                                    </button>
+                                </form>
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -72,6 +105,84 @@
     </div>
 </div>
 
+<div class="modal fade" id="editSourceModal" tabindex="-1" aria-labelledby="editSourceModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form asp-action="Edit" method="post">
+                @Html.AntiForgeryToken()
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editSourceModalLabel">Редактировать источник</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <div asp-validation-summary="ModelOnly" class="text-danger small"></div>
+                    <input type="hidden" asp-for="Edit.Id" id="edit-source-id" />
+                    <div class="mb-2">
+                        <label asp-for="Edit.Name" class="form-label"></label>
+                        <input asp-for="Edit.Name" class="form-control" id="edit-source-name" />
+                        <span asp-validation-for="Edit.Name" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Edit.BaseUrl" class="form-label"></label>
+                        <input asp-for="Edit.BaseUrl" class="form-control" id="edit-source-base-url" />
+                        <span asp-validation-for="Edit.BaseUrl" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Edit.AccessedOnUtc" class="form-label"></label>
+                        <input asp-for="Edit.AccessedOnUtc" class="form-control" id="edit-source-accessed" />
+                        <span asp-validation-for="Edit.AccessedOnUtc" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Edit.SortOrder" class="form-label"></label>
+                        <input asp-for="Edit.SortOrder" class="form-control" id="edit-source-sort-order" type="number" />
+                        <span asp-validation-for="Edit.SortOrder" class="text-danger small"></span>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input asp-for="Edit.IsEnabled" class="form-check-input" id="edit-source-enabled" />
+                        <label asp-for="Edit.IsEnabled" class="form-check-label"></label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+    <script>
+        (function () {
+            const modalEl = document.getElementById('editSourceModal');
+            if (!modalEl) return;
+            const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+            document.querySelectorAll('.btn-edit-source').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    document.getElementById('edit-source-id').value = btn.dataset.id;
+                    document.getElementById('edit-source-name').value = btn.dataset.name;
+                    document.getElementById('edit-source-base-url').value = btn.dataset.baseUrl;
+                    document.getElementById('edit-source-accessed').value = btn.dataset.accessed || '';
+                    document.getElementById('edit-source-sort-order').value = btn.dataset.sortOrder;
+                    document.getElementById('edit-source-enabled').checked = btn.dataset.enabled === 'true';
+                    modal.show();
+                });
+            });
+
+            @if (Model.Edit is not null)
+            {
+                <text>
+                document.getElementById('edit-source-id').value = '@Model.Edit.Id';
+                document.getElementById('edit-source-name').value = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Edit.Name));
+                document.getElementById('edit-source-base-url').value = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Edit.BaseUrl));
+                document.getElementById('edit-source-accessed').value = '@(Model.Edit.AccessedOnUtc?.ToString("yyyy-MM-ddTHH:mm") ?? "")';
+                document.getElementById('edit-source-sort-order').value = '@Model.Edit.SortOrder';
+                document.getElementById('edit-source-enabled').checked = @(Model.Edit.IsEnabled ? "true" : "false");
+                modal.show();
+                </text>
+            }
+        })();
+    </script>
 }

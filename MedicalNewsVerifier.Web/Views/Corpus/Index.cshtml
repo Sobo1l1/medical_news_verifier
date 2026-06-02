@@ -1,6 +1,17 @@
 @model MedicalNewsVerifier.Web.ViewModels.CorpusPageViewModel
+@using System.Text.Json
 @{
     ViewData["Title"] = "Корпус материалов";
+    var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    var corpusJson = JsonSerializer.Serialize(Model.Items.Select(p => new
+    {
+        p.Id,
+        SourceName = p.SourceName,
+        p.Title,
+        p.Url,
+        p.Content,
+        PublishedAtUtc = p.PublishedAtUtc.ToString("yyyy-MM-ddTHH:mm")
+    }), jsonOptions);
 }
 
 <div class="row">
@@ -13,6 +24,10 @@
         @if (TempData["Message"] is string msg)
         {
             <div class="alert alert-success py-2">@msg</div>
+        }
+        @if (TempData["Error"] is string err)
+        {
+            <div class="alert alert-danger py-2">@err</div>
         }
 
         <div class="card shadow-sm mb-4">
@@ -55,15 +70,176 @@
             @foreach (var p in Model.Items)
             {
                 <li class="list-group-item">
-                    <div><strong>@p.SourceName</strong> — @p.Title</div>
-                    <div class="small"><a href="@p.Url" target="_blank" rel="noopener">@p.Url</a></div>
-                    <div class="small text-muted mt-1">@p.PublishedAtUtc.ToString("u") · @(p.Content.Length) симв.</div>
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <div class="flex-grow-1 min-w-0">
+                            <div><strong>@p.SourceName</strong> — @p.Title</div>
+                            <div class="small"><a href="@p.Url" target="_blank" rel="noopener">@p.Url</a></div>
+                            <div class="small text-muted mt-1">@p.PublishedAtUtc.ToString("u") · @(p.Content.Length) симв.</div>
+                        </div>
+                        <div class="text-nowrap flex-shrink-0">
+                            <button type="button" class="btn btn-sm btn-outline-secondary btn-view-corpus" data-id="@p.Id">Просмотр</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary btn-edit-corpus" data-id="@p.Id">Изменить</button>
+                            <form asp-action="Delete" method="post" class="d-inline">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="id" value="@p.Id" />
+                                <button type="submit" class="btn btn-sm btn-outline-danger"
+                                        onclick="return confirm('Удалить материал из корпуса?');">
+                                    Удалить
+                                </button>
+                            </form>
+                        </div>
+                    </div>
                 </li>
             }
         </ul>
     </div>
 </div>
 
+<div class="modal fade" id="viewCorpusModal" tabindex="-1" aria-labelledby="viewCorpusModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="viewCorpusModalLabel">Просмотр материала</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <dl class="row mb-0 small">
+                    <dt class="col-sm-3">Источник</dt>
+                    <dd class="col-sm-9" id="view-corpus-source"></dd>
+                    <dt class="col-sm-3">Заголовок</dt>
+                    <dd class="col-sm-9" id="view-corpus-title"></dd>
+                    <dt class="col-sm-3">URL</dt>
+                    <dd class="col-sm-9" id="view-corpus-url"></dd>
+                    <dt class="col-sm-3">Дата</dt>
+                    <dd class="col-sm-9" id="view-corpus-date"></dd>
+                    <dt class="col-sm-3">Текст</dt>
+                    <dd class="col-sm-9"><pre class="mb-0 small text-break" id="view-corpus-content" style="white-space: pre-wrap;"></pre></dd>
+                </dl>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editCorpusModal" tabindex="-1" aria-labelledby="editCorpusModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form asp-action="Edit" method="post">
+                @Html.AntiForgeryToken()
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editCorpusModalLabel">Редактировать материал</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <div asp-validation-summary="ModelOnly" class="text-danger small"></div>
+                    <input type="hidden" asp-for="Edit.Id" id="edit-corpus-id" />
+                    <div class="mb-2">
+                        <label asp-for="Edit.SourceName" class="form-label"></label>
+                        <input asp-for="Edit.SourceName" class="form-control" id="edit-corpus-source" />
+                        <span asp-validation-for="Edit.SourceName" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Edit.Title" class="form-label"></label>
+                        <input asp-for="Edit.Title" class="form-control" id="edit-corpus-title" />
+                        <span asp-validation-for="Edit.Title" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Edit.Url" class="form-label"></label>
+                        <input asp-for="Edit.Url" class="form-control" id="edit-corpus-url" />
+                        <span asp-validation-for="Edit.Url" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Edit.Content" class="form-label"></label>
+                        <textarea asp-for="Edit.Content" class="form-control" rows="8" id="edit-corpus-content"></textarea>
+                        <span asp-validation-for="Edit.Content" class="text-danger small"></span>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Edit.PublishedAtUtc" class="form-label"></label>
+                        <input asp-for="Edit.PublishedAtUtc" class="form-control" id="edit-corpus-published" />
+                        <span asp-validation-for="Edit.PublishedAtUtc" class="text-danger small"></span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+    <script>
+        (function () {
+            const corpusItems = @Html.Raw(corpusJson);
+            const byId = Object.fromEntries(corpusItems.map(function (p) { return [String(p.id), p]; }));
+
+            const viewModalEl = document.getElementById('viewCorpusModal');
+            const editModalEl = document.getElementById('editCorpusModal');
+            const viewModal = viewModalEl ? bootstrap.Modal.getOrCreateInstance(viewModalEl) : null;
+            const editModal = editModalEl ? bootstrap.Modal.getOrCreateInstance(editModalEl) : null;
+
+            function fillView(item) {
+                document.getElementById('view-corpus-source').textContent = item.sourceName;
+                document.getElementById('view-corpus-title').textContent = item.title;
+                const urlEl = document.getElementById('view-corpus-url');
+                urlEl.innerHTML = '';
+                const link = document.createElement('a');
+                link.href = item.url;
+                link.target = '_blank';
+                link.rel = 'noopener';
+                link.textContent = item.url;
+                urlEl.appendChild(link);
+                document.getElementById('view-corpus-date').textContent = item.publishedAtUtc;
+                document.getElementById('view-corpus-content').textContent = item.content;
+            }
+
+            function fillEdit(item) {
+                document.getElementById('edit-corpus-id').value = item.id;
+                document.getElementById('edit-corpus-source').value = item.sourceName;
+                document.getElementById('edit-corpus-title').value = item.title;
+                document.getElementById('edit-corpus-url').value = item.url;
+                document.getElementById('edit-corpus-content').value = item.content;
+                document.getElementById('edit-corpus-published').value = item.publishedAtUtc;
+            }
+
+            document.querySelectorAll('.btn-view-corpus').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const item = byId[btn.dataset.id];
+                    if (!item || !viewModal) return;
+                    fillView(item);
+                    viewModal.show();
+                });
+            });
+
+            document.querySelectorAll('.btn-edit-corpus').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const item = byId[btn.dataset.id];
+                    if (!item || !editModal) return;
+                    fillEdit(item);
+                    editModal.show();
+                });
+            });
+
+            @if (Model.Edit is not null)
+            {
+                var editItem = new
+                {
+                    Model.Edit.Id,
+                    SourceName = Model.Edit.SourceName,
+                    Model.Edit.Title,
+                    Model.Edit.Url,
+                    Model.Edit.Content,
+                    PublishedAtUtc = Model.Edit.PublishedAtUtc?.ToString("yyyy-MM-ddTHH:mm") ?? ""
+                };
+                <text>
+                fillEdit(@Html.Raw(JsonSerializer.Serialize(editItem, jsonOptions)));
+                editModal.show();
+                </text>
+            }
+        })();
+    </script>
 }

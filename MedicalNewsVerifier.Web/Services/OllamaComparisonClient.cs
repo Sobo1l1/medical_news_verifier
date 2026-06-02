@@ -90,18 +90,31 @@ public sealed partial class OllamaComparisonClient(
             };
         }
 
+        var corpusIsWeak = IsCorpusWeakForFactCheck(corpusExcerpts);
         var corpusBlock = BuildCorpusBlock(corpusExcerpts, opt.MaxCorpusSnippets, opt.MaxCorpusCharsPerSnippet);
         var systemPrompt =
             """
-            Ты — медицинский фактчекер. Сравни новость с выдержками корпуса; если корпус недостаточен, опирайся на общепринятые медицинские знания.
+            Ты — медицинский фактчекер. Сравни новость с выдержками корпуса.
 
-            Верни строго один валидный JSON-объект (без markdown, без пояснений до/после JSON).
-            Поле summary — 2–4 конкретных предложения на русском языке о согласованности новости с корпусом; не используй шаблоны и placeholder-текст.
+            Поле summary обязательно и всегда заполнено (2–4 предложения на русском). Запрещено отвечать одной фразой вроде «информации нет» или «проверить невозможно» без продолжения.
 
-            Пример формата:
-            {"alignmentScore":65,"summary":"Новость частично согласуется с корпусом, но отдельные утверждения требуют проверки по первоисточникам.","flags":["requires_verification"]}
+            Структура summary:
+            1) Что показал корпус (совпадения, пробелы, нерелевантность выдержек).
+            2) Предварительная оценка новости по общепринятым медицинским знаниям — даже если корпус пуст или не по теме. Явно пометь, что это экспертная оценка модели, а не цитата из корпуса.
+            Итог: пользователь всегда получает и вывод по корпусу, и осторожный медицинский комментарий.
 
-            Примеры flags: insufficient_corpus, requires_verification, possible_contradiction, unsupported_claims, accurate.
+            alignmentScore (0–100): согласованность новости с корпусом; при слабом корпусе опирайся на п.2, но снижай уверенность (обычно 35–65, не выше 75 без подтверждений).
+
+            Верни строго один JSON-объект (без markdown):
+            {"alignmentScore":0-100,"summary":"...","flags":["snake_case"]}
+
+            Пример при слабом корпусе:
+            {"alignmentScore":52,"summary":"В выдержках корпуса нет статистики по теме новости, только общие сведения об источнике. С учётом общих медицинских знаний рекомендации в новости звучат правдоподобно, но цифры и региональные данные нужно сверить с официальной отчётностью.","flags":["insufficient_corpus","requires_verification"]}
+
+            Пример при релевантном корпусе:
+            {"alignmentScore":78,"summary":"Корпус подтверждает ключевые тезисы о профилактике. Формулировки новости в целом согласуются с официальными рекомендациями.","flags":["accurate"]}
+
+            flags: insufficient_corpus, requires_verification, possible_contradiction, unsupported_claims, accurate.
             """;
 
         var userPrompt =
@@ -138,7 +151,12 @@ public sealed partial class OllamaComparisonClient(
                 score = Math.Clamp(score.Value, 0, 100);
             }
 
-            var summary = NormalizeSummary(parsed.Summary);
+            var summary = EnsureSubstantiveSummary(
+                NormalizeSummary(parsed.Summary),
+                parsed.Flags,
+                score,
+                corpusIsWeak);
+
             if (summary?.Length > 8000)
             {
                 summary = summary[..7997] + "…";
@@ -147,8 +165,9 @@ public sealed partial class OllamaComparisonClient(
             if (string.IsNullOrWhiteSpace(summary) && score.HasValue)
             {
                 logger.LogWarning(
-                    "Ollama: JSON распознан (score={Score}), но summary пустой или шаблонный",
+                    "Ollama: JSON распознан (score={Score}), summary восстановлен из запасного шаблона",
                     score);
+                summary = BuildFallbackSummary(score.Value, corpusIsWeak);
             }
 
             return new OllamaComparisonOutcome
@@ -389,7 +408,9 @@ public sealed partial class OllamaComparisonClient(
     {
         if (corpus.Count == 0)
         {
-            return "(Корпус пуст — оцени только внутреннюю согласованность и осторожность формулировок; в flags добавь insufficient_corpus.)";
+            return """
+                (Релевантных выдержек в корпусе нет. В summary обязательно укажи это и добавь предварительную оценку новости по общим медицинским знаниям — не ограничивайся фразой «проверить невозможно». В flags добавь insufficient_corpus.)
+                """;
         }
 
         var sb = new StringBuilder();
@@ -586,6 +607,113 @@ public sealed partial class OllamaComparisonClient(
         return string.IsNullOrWhiteSpace(reasoning) ? string.Empty : reasoning.Trim();
     }
 
+    private static bool IsCorpusWeakForFactCheck(IReadOnlyList<OfficialPublication> corpus) =>
+        corpus.Count == 0;
+
+    private static string? EnsureSubstantiveSummary(
+        string? summary,
+        List<string>? flags,
+        int? score,
+        bool corpusIsWeak)
+    {
+        var weakCorpus = corpusIsWeak ||
+                          flags?.Any(f => string.Equals(f, "insufficient_corpus", StringComparison.OrdinalIgnoreCase)) == true;
+
+        if (string.IsNullOrWhiteSpace(summary))
+        {
+            return score.HasValue ? BuildFallbackSummary(score.Value, weakCorpus) : null;
+        }
+
+        if (!weakCorpus && !LooksLikeCorpusOnlyRefusal(summary))
+        {
+            return summary;
+        }
+
+        if (HasMedicalKnowledgeAssessment(summary))
+        {
+            return summary;
+        }
+
+        var tail = BuildMedicalKnowledgeTail(score, weakCorpus);
+        var trimmed = summary.TrimEnd();
+        if (trimmed.EndsWith('.') || trimmed.EndsWith('!') || trimmed.EndsWith('?'))
+        {
+            return $"{trimmed} {tail}";
+        }
+
+        return $"{trimmed}. {tail}";
+    }
+
+    private static string BuildFallbackSummary(int score, bool corpusIsWeak)
+    {
+        var corpusPart = corpusIsWeak
+            ? "В доверенном корпусе нет выдержек, напрямую относящихся к теме новости."
+            : "Сопоставление с корпусом дало ограниченный результат.";
+
+        return $"{corpusPart} {BuildMedicalKnowledgeTail(score, corpusIsWeak)}";
+    }
+
+    private static string BuildMedicalKnowledgeTail(int? score, bool corpusIsWeak)
+    {
+        var prefix = corpusIsWeak
+            ? "С учётом общих медицинских знаний (без опоры на корпус)"
+            : "С учётом общих медицинских знаний";
+
+        if (!score.HasValue)
+        {
+            return $"{prefix} содержание новости выглядит правдоподобным, но отдельные факты требуют проверки по официальным источникам.";
+        }
+
+        return score.Value switch
+        {
+            >= 70 =>
+                $"{prefix} основные рекомендации в новости выглядят правдоподобными и не противоречат типичной практике, однако без прямых подтверждений из корпуса вывод остаётся предварительным.",
+            <= 40 =>
+                $"{prefix} в новости есть формулировки, которые могут вводить в заблуждение или требуют жёсткой проверки по первоисточникам; уверенность в достоверности низкая.",
+            _ =>
+                $"{prefix} часть тезисов звучит разумно, но конкретные цифры, региональная статистика и сильные утверждения нужно сверить с официальными публикациями."
+        };
+    }
+
+    private static bool HasMedicalKnowledgeAssessment(string summary)
+    {
+        var lower = summary.ToLowerInvariant();
+        string[] markers =
+        [
+            "общих медицин",
+            "общепринят",
+            "с учётом",
+            "по общим",
+            "правдоподоб",
+            "рекомендац",
+            "предварительн",
+            "вероятн",
+            "скорее всего",
+            "можно предположить",
+            "типичн",
+            "не противореч"
+        ];
+
+        return markers.Any(m => lower.Contains(m, StringComparison.Ordinal));
+    }
+
+    private static bool LooksLikeCorpusOnlyRefusal(string summary)
+    {
+        if (CorpusOnlyRefusalRegex().IsMatch(summary))
+        {
+            return true;
+        }
+
+        var lower = summary.ToLowerInvariant();
+        var hasRefusal = lower.Contains("невозможно проверить", StringComparison.Ordinal)
+                         || lower.Contains("не удалось проверить", StringComparison.Ordinal)
+                         || lower.Contains("проверить факты невозможно", StringComparison.Ordinal)
+                         || lower.Contains("информации нет", StringComparison.Ordinal)
+                         || lower.Contains("информации не найдено", StringComparison.Ordinal);
+
+        return hasRefusal && !HasMedicalKnowledgeAssessment(summary);
+    }
+
     private static string? NormalizeSummary(string? summary)
     {
         if (string.IsNullOrWhiteSpace(summary))
@@ -612,6 +740,11 @@ public sealed partial class OllamaComparisonClient(
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..max] + "…";
+
+    [GeneratedRegex(
+        @"(невозможно\s+проверить|не\s+удалось\s+проверить|проверить\s+факт\w*\s+невозможно|информаци\w*\s+не\s+найден\w*)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CorpusOnlyRefusalRegex();
 
     [GeneratedRegex(@"^<[^>]{1,120}>$", RegexOptions.CultureInvariant)]
     private static partial Regex TemplatePlaceholderRegex();

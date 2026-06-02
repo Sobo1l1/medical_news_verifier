@@ -53,7 +53,7 @@
     <!-- Фильтры -->
     <div class="card mb-4 shadow-sm">
         <div class="card-header bg-light">
-            <h5 class="mb-0">🔍 Фильтры поиска</h5>
+            <h5 class="mb-0">Фильтры поиска</h5>
         </div>
         <div class="card-body">
             <form method="get" class="row g-3" asp-action="History">
@@ -66,9 +66,9 @@
                     <label class="form-label">Статус</label>
                     <select class="form-select" name="status">
                         <option value="">— Все —</option>
-                        <option value="2" selected="@(Model.StatusFilter == VerificationStatus.Suspicious)">🔴 Подозрительные</option>
-                        <option value="1" selected="@(Model.StatusFilter == VerificationStatus.NeedsReview)">🟡 Требуют проверки</option>
-                        <option value="0" selected="@(Model.StatusFilter == VerificationStatus.LikelyReliable)">🟢 Достоверные</option>
+                        <option value="2" selected="@(Model.StatusFilter == VerificationStatus.Suspicious)">Подозрительные</option>
+                        <option value="1" selected="@(Model.StatusFilter == VerificationStatus.NeedsReview)">Требуют проверки</option>
+                        <option value="0" selected="@(Model.StatusFilter == VerificationStatus.LikelyReliable)">Достоверные</option>
                     </select>
                 </div>
 
@@ -95,11 +95,11 @@
                 <div class="col-md-3">
                     <label class="form-label">Сортировка</label>
                     <select class="form-select" name="sortBy">
-                        <option value="DateDesc" selected="@(Model.SortBy == "DateDesc")">📅 Свежие первыми</option>
-                        <option value="DateAsc" selected="@(Model.SortBy == "DateAsc")">📅 Старые первыми</option>
-                        <option value="ScoreDesc" selected="@(Model.SortBy == "ScoreDesc")">📈 Высокая оценка</option>
-                        <option value="ScoreAsc" selected="@(Model.SortBy == "ScoreAsc")">📉 Низкая оценка</option>
-                        <option value="HeadlineAsc" selected="@(Model.SortBy == "HeadlineAsc")">🔤 По заголовку (A-Z)</option>
+                        <option value="DateDesc" selected="@(Model.SortBy == "DateDesc")">Свежие первыми</option>
+                        <option value="DateAsc" selected="@(Model.SortBy == "DateAsc")">Старые первыми</option>
+                        <option value="ScoreDesc" selected="@(Model.SortBy == "ScoreDesc")">Высокая оценка</option>
+                        <option value="ScoreAsc" selected="@(Model.SortBy == "ScoreAsc")">Низкая оценка</option>
+                        <option value="HeadlineAsc" selected="@(Model.SortBy == "HeadlineAsc")">По заголовку (A-Z)</option>
                     </select>
                 </div>
 
@@ -120,7 +120,7 @@
     {
         <div class="card shadow-sm">
             <div class="card-header bg-light">
-                <h6 class="mb-0">📋 Результаты (@Model.PageNumber of @Model.TotalPages)</h6>
+                <h6 class="mb-0">Результаты (@Model.PageNumber of @Model.TotalPages)</h6>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -143,12 +143,6 @@
                                     VerificationStatus.Suspicious => "danger",
                                     VerificationStatus.NeedsReview => "warning",
                                     _ => "success"
-                                };
-                                var statusEmoji = record.Status switch
-                                {
-                                    VerificationStatus.Suspicious => "🔴",
-                                    VerificationStatus.NeedsReview => "🟡",
-                                    _ => "🟢"
                                 };
                                 var statusText = record.Status switch
                                 {
@@ -174,7 +168,7 @@
                                         <span class="badge bg-secondary fs-6">@record.ReliabilityScore/100</span>
                                     </td>
                                     <td>
-                                        <span class="badge bg-@statusClass">@statusEmoji @statusText</span>
+                                        <span class="badge bg-@statusClass">@statusText</span>
                                     </td>
                                     <td class="small text-muted">
                                         @record.CreatedAtUtc.ToString("dd.MM.yyyy HH:mm")
@@ -183,14 +177,14 @@
                                         <span class="badge bg-info">@record.SuspiciousFragments.Count</span>
                                     </td>
                                     <td>
-                                        <a href="/Home/Details/@record.Id" class="btn btn-sm btn-outline-primary" title="Просмотреть детали">
-                                            👁️ Просмотр
+                                        <a href="/Home/Details/@record.Id?fromHistory=true" class="btn btn-sm btn-outline-primary" title="Просмотреть детали">
+                                            Просмотр
                                         </a>
                                         <form method="post" action="/Home/Delete" style="display:inline;">
                                             @Html.AntiForgeryToken()
                                             <input type="hidden" name="id" value="@record.Id" />
                                             <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить проверку из истории?');" title="Удалить">
-                                                🗑️ Удалить
+                                                Удалить
                                             </button>
                                         </form>
                                     </td>
@@ -210,7 +204,7 @@
                     @if (Model.PageNumber > 1)
                     {
                         <li class="page-item">
-                            <a class="page-link" href="?page=1&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">⬅️ Первая</a>
+                            <a class="page-link" href="?page=1&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">Первая</a>
                         </li>
                         <li class="page-item">
                             <a class="page-link" href="?page=@(Model.PageNumber - 1)&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">← Предыдущая</a>
@@ -230,7 +224,7 @@
                             <a class="page-link" href="?page=@(Model.PageNumber + 1)&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">Следующая →</a>
                         </li>
                         <li class="page-item">
-                            <a class="page-link" href="?page=@Model.TotalPages&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">Последняя ➡️</a>
+                            <a class="page-link" href="?page=@Model.TotalPages&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">Последняя</a>
                         </li>
                     }
                 </ul>
@@ -240,7 +234,7 @@
     else
     {
         <div class="alert alert-info">
-            ℹ️ Нет результатов, соответствующих выбранным фильтрам.
+            Нет результатов, соответствующих выбранным фильтрам.
         </div>
     }
 </div>

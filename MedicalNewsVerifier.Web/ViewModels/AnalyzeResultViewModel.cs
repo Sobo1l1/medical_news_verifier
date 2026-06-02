@@ -9,7 +9,7 @@ public class AnalyzeResultViewModel
     public List<OfficialPublicationMatchVm> OfficialMatches { get; set; } = [];
     public bool IsFromHistory { get; set; }
 
-    /// <summary>Открыто из журнала проверок (GET Details).</summary>
+    /// <summary>Открыто из журнала проверок (GET Details?fromHistory=true).</summary>
     public bool OpenedFromHistory { get; set; }
 
     /// <summary>Строка, по которой заданы смещения фрагментов (заголовок + тело).</summary>

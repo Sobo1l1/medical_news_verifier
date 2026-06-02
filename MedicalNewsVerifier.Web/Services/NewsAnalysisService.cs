@@ -365,9 +365,14 @@ public partial class NewsAnalysisService(
 
         if (llm.Succeeded)
         {
-            var s = string.IsNullOrWhiteSpace(llm.Summary)
-                ? $"Модель: alignmentScore={llm.AlignmentScore}."
-                : llm.Summary.Trim();
+            if (string.IsNullOrWhiteSpace(llm.Summary))
+            {
+                return llm.AlignmentScore.HasValue
+                    ? $"Предварительная оценка модели (без текстового резюме): {llm.AlignmentScore} из 100. Рекомендуется сверка с официальными источниками."
+                    : "Модель завершила анализ без текстового резюме; ориентируйтесь на эвристическую оценку.";
+            }
+
+            var s = llm.Summary.Trim();
             return s.Length > 8000 ? s[..7997] + "…" : s;
         }
 
@@ -376,6 +381,20 @@ public partial class NewsAnalysisService(
 
     private async Task<List<OfficialPublication>> LoadPublicationsCorpusAsync(CancellationToken cancellationToken)
     {
+        var fromDb = await db.OfficialPublications
+            .Include(p => p.TrustedSource)
+            .AsNoTracking()
+            .Where(p => p.TrustedSource!.IsEnabled)
+            .ToListAsync(cancellationToken);
+
+        if (fromDb.Count > 0)
+        {
+            logger.LogInformation(
+                "Corpus for analysis: {Count} publication(s) from database (manual corpus)",
+                fromDb.Count);
+            return fromDb;
+        }
+
         List<OfficialPublication> fromWeb;
         try
         {
@@ -383,17 +402,19 @@ public partial class NewsAnalysisService(
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            logger.LogWarning("Official source fetch canceled internally, switching to DB fallback");
+            logger.LogWarning("Official source fetch canceled internally, corpus will be empty");
             fromWeb = [];
         }
 
-        if (fromWeb.Count == 0)
+        if (fromWeb.Count > 0)
         {
-            logger.LogInformation("No web sources fetched, fallback to database source list");
-            fromWeb = await db.OfficialPublications
-                .Include(p => p.TrustedSource)
-                .AsNoTracking()
-                .ToListAsync(cancellationToken);
+            logger.LogInformation(
+                "Corpus for analysis: {Count} publication(s) fetched from OfficialSources:Urls (DB corpus is empty)",
+                fromWeb.Count);
+        }
+        else
+        {
+            logger.LogWarning("Corpus for analysis is empty: no DB publications and no web sources fetched");
         }
 
         return fromWeb;

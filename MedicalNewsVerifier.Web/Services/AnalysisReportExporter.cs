@@ -85,13 +85,6 @@ public class AnalysisReportExporter : IAnalysisReportExporter
             _ => "success"
         };
 
-        var statusEmoji = record.Status switch
-        {
-            VerificationStatus.Suspicious => "⚠️",
-            VerificationStatus.NeedsReview => "❓",
-            _ => "✅"
-        };
-
         var statusText = record.Status switch
         {
             VerificationStatus.Suspicious => "ПОДОЗРИТЕЛЬНА",
@@ -133,7 +126,7 @@ public class AnalysisReportExporter : IAnalysisReportExporter
 
         <div class='section'>
             <h3>Статус проверки</h3>
-            <div class='status-badge'>{statusEmoji} {statusText}</div>
+            <div class='status-badge'>{statusText}</div>
         </div>
 
         <div class='section'>

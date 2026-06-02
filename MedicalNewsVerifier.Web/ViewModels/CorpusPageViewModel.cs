@@ -6,4 +6,5 @@ public class CorpusPageViewModel
 {
     public List<OfficialPublication> Items { get; set; } = [];
     public OfficialPublicationInputModel Input { get; set; } = new();
+    public OfficialPublicationEditInputModel? Edit { get; set; }
 }
