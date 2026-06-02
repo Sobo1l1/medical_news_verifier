@@ -13,11 +13,21 @@ public sealed class OllamaOptions
     public bool Enabled { get; set; } = true;
     public string BaseUrl { get; set; } = "http://localhost:11434/v1";
     public string Model { get; set; } = "qwen3.5:9b";
-    public int TimeoutSeconds { get; set; } = 120;
+    public int TimeoutSeconds { get; set; } = 300;
     public int MaxCorpusCharsPerSnippet { get; set; } = 2200;
     public int MaxCorpusSnippets { get; set; } = 4;
     /// <summary>Максимальное число токенов в ответе от модели. По умолчанию ~2000 токенов ≈ 5-6 КБ текста.</summary>
     public int MaxResponseTokens { get; set; } = 2000;
+    /// <summary>
+    /// Пытаемся включить принудительный JSON-режим в OpenAI-совместимом API (response_format: json_object).
+    /// Важно: поддерживается не всеми моделями/версиями Ollama.
+    /// </summary>
+    public bool ForceJsonResponseFormat { get; set; } = true;
+
+    /// <summary>
+    /// Предпочитать нативный Ollama API (/api/chat) с format="json" (самый надёжный способ получить JSON без thinking).
+    /// </summary>
+    public bool PreferNativeApi { get; set; } = true;
 }
 
 public sealed partial class OllamaComparisonClient(
@@ -29,6 +39,12 @@ public sealed partial class OllamaComparisonClient(
     {
         PropertyNameCaseInsensitive = true,
         NumberHandling = JsonNumberHandling.AllowReadingFromString
+    };
+
+    private static readonly JsonDocumentOptions RelaxedJsonDocOptions = new()
+    {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip
     };
 
     public async Task<OllamaComparisonOutcome> CompareNewsToCorpusAsync(
@@ -72,75 +88,12 @@ public sealed partial class OllamaComparisonClient(
         var corpusBlock = BuildCorpusBlock(corpusExcerpts, opt.MaxCorpusSnippets, opt.MaxCorpusCharsPerSnippet);
         var systemPrompt =
             """
-            ТЫ ОБЯЗАН ВЕРНУТЬ СТРОГО ВАЛИДНЫЙ JSON И НИЧЕГО КРОМЕ JSON.
+            Ты — медицинский фактчекер. Сравни новость с выдержками корпуса; если корпус недостаточен, опирайся на общепринятые медицинские знания.
 
-            ЗАПРЕЩЕНО:
-            - любой текст вне JSON;
-            - markdown;
-            - комментарии;
-            - пояснения;
-            - reasoning/thinking;
-            - служебные сообщения;
-            - ```json блоки;
-            - переносы с пояснениями.
+            Верни строго один валидный JSON-объект (без markdown/пояснений):
+            {"alignmentScore":0-100,"summary":"<русский краткий вывод>","flags":["snake_case"]}
 
-            ЕСЛИ ДАННЫХ НЕДОСТАТОЧНО — ВСЁ РАВНО ВЕРНИ JSON ПО СХЕМЕ.
-
-            Ты — медицинский фактчекер и аналитик достоверности.
-            Твоя задача:
-            1. Сравнить текст новости пользователя с предоставленными выдержками из доверенных источников.
-            2. Оценивать ТОЛЬКО фактическое соответствие переданным выдержкам.
-            3. НЕ додумывать факты.
-            4. НЕ учитывать стиль написания как ложность, если факты не противоречат выдержкам.
-            5. Если выдержки не покрывают часть утверждений — снижать уверенность, но не считать это автоматически ложью.
-            6. Если новость содержит категоричные, сенсационные, манипулятивные или неподтверждённые формулировки — отражать это во flags.
-            7. Если источники противоречат новости напрямую — существенно снижать alignmentScore.
-
-            ТРЕБОВАНИЯ К ОЦЕНКЕ:
-            - 80-100:
-              Утверждения в целом подтверждаются выдержками либо не противоречат им.
-            - 40-79:
-              Есть слабая опора, неполное покрытие, преувеличения, неоднозначность или недостаток подтверждений.
-            - 0-39:
-              Есть явные противоречия, сильная сенсационность, искажение выводов или неподтверждённые категоричные утверждения.
-
-            ТРЕБОВАНИЯ К summary:
-            - Только русский язык.
-            - Кратко.
-            - 1-3 предложения.
-            - Без markdown.
-            - Описывать только вывод проверки.
-
-            ТРЕБОВАНИЯ К flags:
-            Используй короткие snake_case метки.
-            Допустимые примеры:
-            - "possible_contradiction"
-            - "insufficient_corpus"
-            - "sensational_tone"
-            - "unsupported_claims"
-            - "exaggeration"
-            - "selective_framing"
-            - "consistent_with_sources"
-            - "neutral_tone"
-
-            ЕСЛИ ФЛАГОВ НЕТ — ВЕРНИ ПУСТОЙ МАССИВ.
-
-            СТРОГАЯ СХЕМА ОТВЕТА:
-            {
-              "alignmentScore": <integer 0-100>,
-              "summary": "<string>",
-              "flags": ["<string>"]
-            }
-
-            ВАЖНО:
-            - alignmentScore должен быть ЦЕЛЫМ ЧИСЛОМ.
-            - flags всегда массив.
-            - summary всегда строка.
-            - JSON должен корректно парситься стандартным JSON parser.
-            - Не экранируй JSON в строку.
-            - Не добавляй лишние поля.
-            - Не добавляй trailing commas.
-            - Верни только один JSON-объект.
+            Примеры flags: insufficient_corpus, requires_verification, possible_contradiction, unsupported_claims, accurate.
             """;
 
         var userPrompt =
@@ -153,79 +106,21 @@ public sealed partial class OllamaComparisonClient(
             {corpusBlock}
             """;
 
-        var payload = new ChatCompletionRequest
-        {
-            Model = opt.Model.Trim(),
-            Stream = false,
-            Temperature = 0.0,  // Полностью детерминированный, без thinking
-            TopP = 0.1,
-            MaxTokens = opt.MaxResponseTokens,  // Ограничиваем длину ответа
-            Messages =
-            [
-                new ChatMessage { Role = "system", Content = systemPrompt },
-                new ChatMessage { Role = "user", Content = userPrompt }
-            ]
-        };
-
         try
         {
-            var requestBody = JsonSerializer.Serialize(payload, JsonOptions);
-            using var req = new HttpRequestMessage(HttpMethod.Post, "chat/completions")
-            {
-                Content = new StringContent(requestBody, Encoding.UTF8, "application/json")
-            };
-            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            var parsed = await TryGetParsedModelJsonAsync(
+                opt,
+                systemPrompt,
+                userPrompt,
+                cancellationToken);
 
-            using var response = await httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                logger.LogWarning("Ollama HTTP {Status}: {Body}", (int)response.StatusCode, Truncate(body, 500));
-                return new OllamaComparisonOutcome
-                {
-                    WasAttempted = true,
-                    Succeeded = false,
-                    ErrorMessage = $"Ollama вернула код {(int)response.StatusCode}."
-                };
-            }
-
-            logger.LogDebug("Ollama response body length={Length}", body.Length);
-            using var doc = JsonDocument.Parse(body);
-
-            if (!doc.RootElement.TryGetProperty("choices", out var choices) ||
-                choices.GetArrayLength() == 0 ||
-                !choices[0].TryGetProperty("message", out var messageObj))
-            {
-                logger.LogWarning("Ollama: некорректная структура ответа");
-                return new OllamaComparisonOutcome
-                {
-                    WasAttempted = true,
-                    Succeeded = false,
-                    ErrorMessage = "Ollama вернула некорректную структуру ответа."
-                };
-            }
-
-            var content = messageObj.TryGetProperty("content", out var contentProp)
-                ? contentProp.GetString() ?? string.Empty
-                : string.Empty;
-
-            if (string.IsNullOrWhiteSpace(content) && messageObj.TryGetProperty("reasoning", out var reasoningProp))
-            {
-                content = reasoningProp.GetString() ?? string.Empty;
-                logger.LogWarning("Ollama: content пуст, используем reasoning поле (длина {Length})", content.Length);
-            }
-
-            var parsed = ParseModelJson(content);
             if (parsed is null)
             {
-                logger.LogWarning("Ollama: не удалось разобрать JSON. Длина: {Length} chars. Первые 500 символов: {Preview}",
-                    content.Length,
-                    content.Length > 500 ? content[..500] : content);
                 return new OllamaComparisonOutcome
                 {
                     WasAttempted = true,
                     Succeeded = false,
-                    ErrorMessage = $"Модель вернула ответ, который не удалось разобрать как JSON (длина {content.Length}). Проверьте логи приложения."
+                    ErrorMessage = "Модель вернула ответ, который не удалось разобрать как JSON. Проверьте логи приложения."
                 };
             }
 
@@ -236,9 +131,9 @@ public sealed partial class OllamaComparisonClient(
             }
 
             var summary = parsed.Summary?.Trim();
-            if (summary?.Length > 3500)
+            if (summary?.Length > 8000)
             {
-                summary = summary[..3497] + "…";
+                summary = summary[..7997] + "…";
             }
 
             return new OllamaComparisonOutcome
@@ -263,6 +158,203 @@ public sealed partial class OllamaComparisonClient(
                 ErrorMessage = ex.Message
             };
         }
+    }
+
+    private async Task<LlmJsonPayload?> TryGetParsedModelJsonAsync(
+        OllamaOptions opt,
+        string systemPrompt,
+        string userPrompt,
+        CancellationToken cancellationToken)
+    {
+        if (opt.PreferNativeApi)
+        {
+            var fromNative = await TryParseNativeAsync(opt, systemPrompt, userPrompt, cancellationToken);
+            if (fromNative is not null)
+            {
+                return fromNative;
+            }
+        }
+
+        // OpenAI-совместимый endpoint (/v1/chat/completions), если BaseUrl на него указывает.
+        if (opt.BaseUrl.Contains("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            var (openAiText, openAiTextLen) = await TryCallOpenAiChatCompletionsAsync(opt, systemPrompt, userPrompt, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(openAiText))
+            {
+                var parsed = ParseModelJson(openAiText);
+                if (parsed is not null)
+                {
+                    return parsed;
+                }
+
+                logger.LogWarning("Ollama: не удалось разобрать JSON (OpenAI /v1). Длина: {Length} chars. Первые 500 символов: {Preview}",
+                    openAiTextLen,
+                    Truncate(openAiText, 500));
+            }
+        }
+
+        if (!opt.PreferNativeApi)
+        {
+            var fromNative = await TryParseNativeAsync(opt, systemPrompt, userPrompt, cancellationToken);
+            if (fromNative is not null)
+            {
+                return fromNative;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<LlmJsonPayload?> TryParseNativeAsync(
+        OllamaOptions opt,
+        string systemPrompt,
+        string userPrompt,
+        CancellationToken cancellationToken)
+    {
+        logger.LogDebug("Ollama: trying native /api/chat format=json");
+
+        var nativeText = await TryCallNativeOllamaChatAsync(opt, systemPrompt, userPrompt, cancellationToken);
+        if (string.IsNullOrWhiteSpace(nativeText))
+        {
+            logger.LogWarning("Ollama: native /api/chat returned empty content");
+            return null;
+        }
+
+        var parsed = ParseModelJson(nativeText);
+        if (parsed is not null)
+        {
+            return parsed;
+        }
+
+        logger.LogWarning("Ollama: не удалось разобрать JSON (native /api/chat). Длина: {Length} chars. Первые 500 символов: {Preview}",
+            nativeText.Length,
+            Truncate(nativeText, 500));
+        return null;
+    }
+
+    private async Task<(string Text, int Length)> TryCallOpenAiChatCompletionsAsync(
+        OllamaOptions opt,
+        string systemPrompt,
+        string userPrompt,
+        CancellationToken cancellationToken)
+    {
+        var payload = new ChatCompletionRequest
+        {
+            Model = opt.Model.Trim(),
+            Stream = false,
+            Temperature = 0.2,
+            TopP = 0.9,
+            MaxTokens = opt.MaxResponseTokens,
+            ResponseFormat = opt.ForceJsonResponseFormat ? new ResponseFormat { Type = "json_object" } : null,
+            Messages =
+            [
+                new ChatMessage { Role = "system", Content = systemPrompt },
+                new ChatMessage { Role = "user", Content = userPrompt }
+            ]
+        };
+
+        var requestBody = JsonSerializer.Serialize(payload, JsonOptions);
+        using var req = new HttpRequestMessage(HttpMethod.Post, "chat/completions")
+        {
+            Content = new StringContent(requestBody, Encoding.UTF8, "application/json")
+        };
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Ollama HTTP {Status}: {Body}", (int)response.StatusCode, Truncate(body, 500));
+            return (string.Empty, 0);
+        }
+
+        logger.LogDebug("Ollama response body length={Length}", body.Length);
+        using var doc = JsonDocument.Parse(body);
+
+        if (!doc.RootElement.TryGetProperty("choices", out var choices) ||
+            choices.GetArrayLength() == 0 ||
+            !choices[0].TryGetProperty("message", out var messageObj))
+        {
+            logger.LogWarning("Ollama: некорректная структура ответа (/v1)");
+            return (string.Empty, 0);
+        }
+
+        var content = messageObj.TryGetProperty("content", out var contentProp)
+            ? contentProp.GetString() ?? string.Empty
+            : string.Empty;
+
+        var reasoning = messageObj.TryGetProperty("reasoning", out var reasoningProp)
+            ? (reasoningProp.GetString() ?? string.Empty)
+            : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(content) && !string.IsNullOrWhiteSpace(reasoning))
+        {
+            logger.LogWarning("Ollama: content пуст, используем reasoning поле (длина {Length})", reasoning.Length);
+        }
+
+        var parseInput = string.IsNullOrWhiteSpace(reasoning)
+            ? content
+            : $"{content}\n\n{reasoning}";
+
+        return (parseInput, parseInput.Length);
+    }
+
+    private async Task<string> TryCallNativeOllamaChatAsync(
+        OllamaOptions opt,
+        string systemPrompt,
+        string userPrompt,
+        CancellationToken cancellationToken)
+    {
+        // Преобразуем BaseUrl "http://host:11434/v1" -> "http://host:11434"
+        var baseUrl = opt.BaseUrl.Trim().TrimEnd('/');
+        if (baseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            baseUrl = baseUrl[..^3];
+        }
+
+        var url = $"{baseUrl}/api/chat";
+        var payload = new NativeChatRequest
+        {
+            Model = opt.Model.Trim(),
+            Stream = false,
+            Format = "json",
+            Messages =
+            [
+                new NativeChatMessage { Role = "system", Content = systemPrompt },
+                new NativeChatMessage { Role = "user", Content = userPrompt }
+            ],
+            Options = new NativeChatOptions
+            {
+                Temperature = 0.0,
+                TopP = 1.0,
+                NumPredict = opt.MaxResponseTokens
+            }
+        };
+
+        var requestBody = JsonSerializer.Serialize(payload, JsonOptions);
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(requestBody, Encoding.UTF8, "application/json")
+        };
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Ollama native HTTP {Status}: {Body}", (int)response.StatusCode, Truncate(body, 500));
+            return string.Empty;
+        }
+
+        using var doc = JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("message", out var msg) ||
+            !msg.TryGetProperty("content", out var contentProp))
+        {
+            logger.LogWarning("Ollama: некорректная структура ответа (native /api/chat)");
+            return string.Empty;
+        }
+
+        return contentProp.GetString() ?? string.Empty;
     }
 
     private static string BuildCorpusBlock(IReadOnlyList<OfficialPublication> corpus, int maxSnippets, int maxChars)
@@ -309,34 +401,138 @@ public sealed partial class OllamaComparisonClient(
         // Удаляем весь текст типа "1. **Analyze the Request:**" и подобные структурированные рассуждения до первого {
         trimmed = Regex.Replace(trimmed, @"^\s*\d+\s*\.\s*\*\*.*?(?=\{)", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
 
-        // Удаляем markdown блоки
+        // Удаляем markdown ограждения ```json / ```
         trimmed = MarkdownFenceRegex().Replace(trimmed, "").Trim();
 
-        // Удаляем всё до первой {
-        var jsonStart = trimmed.IndexOf('{');
-        if (jsonStart < 0)
+        // Пробуем распарсить любой валидный JSON-объект из ответа (с разрешением trailing commas).
+        LlmJsonPayload? firstParsed = null;
+        foreach (var json in ExtractJsonObjects(trimmed))
         {
-            return null;
+            var parsed = TryDeserializePayload(json);
+            if (parsed is null)
+            {
+                continue;
+            }
+
+            firstParsed ??= parsed;
+            if (parsed.AlignmentScore is not null)
+            {
+                return parsed;
+            }
         }
 
-        trimmed = trimmed[jsonStart..].Trim();
-
-        // Находим последний }
-        var jsonEnd = trimmed.LastIndexOf('}');
-        if (jsonEnd <= 0)
+        // Если JSON валиден, но alignmentScore не нашли — всё равно вернём первый распарсенный объект.
+        if (firstParsed is not null)
         {
-            return null;
+            return firstParsed;
         }
 
-        var json = trimmed[..(jsonEnd + 1)];
+        // Последняя попытка: вытащить хотя бы alignmentScore/summary из JSON-подобного текста.
+        return TrySalvageFromText(trimmed);
+    }
+
+    private static LlmJsonPayload? TryDeserializePayload(string json)
+    {
         try
         {
-            return JsonSerializer.Deserialize<LlmJsonPayload>(json, JsonOptions);
+            using var doc = JsonDocument.Parse(json, RelaxedJsonDocOptions);
+            var normalized = doc.RootElement.GetRawText();
+            return JsonSerializer.Deserialize<LlmJsonPayload>(normalized, JsonOptions);
         }
         catch
         {
             return null;
         }
+    }
+
+    private static IEnumerable<string> ExtractJsonObjects(string s)
+    {
+        var start = -1;
+        var depth = 0;
+        var inString = false;
+        var escape = false;
+
+        for (var i = 0; i < s.Length; i++)
+        {
+            var ch = s[i];
+
+            if (inString)
+            {
+                switch (ch)
+                {
+                    case '_' when escape:
+                        escape = false;
+                        break;
+                    case '\\':
+                        escape = true;
+                        break;
+                    case '"':
+                        inString = false;
+                        break;
+                }
+                continue;
+            }
+
+            switch (ch)
+            {
+                case '"':
+                    inString = true;
+                    break;
+                case '{':
+                    if (depth == 0)
+                    {
+                        start = i;
+                    }
+                    depth++;
+                    break;
+                case '}':
+                    if (depth == 0)
+                    {
+                        break;
+                    }
+
+                    depth--;
+                    if (depth == 0 && start >= 0)
+                    {
+                        yield return s[start..(i + 1)];
+                        start = -1;
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static LlmJsonPayload? TrySalvageFromText(string s)
+    {
+        var scoreMatch = Regex.Match(s, "\"alignmentScore\"\\s*:\\s*(\\d{1,3})", RegexOptions.IgnoreCase);
+        int? score = null;
+        if (scoreMatch.Success && int.TryParse(scoreMatch.Groups[1].Value, out var parsedScore))
+        {
+            score = Math.Clamp(parsedScore, 0, 100);
+        }
+
+        string? summary = null;
+        var summaryMatch = Regex.Match(s, "\"summary\"\\s*:\\s*\"((?:\\\\\"|[^\"])*)\"", RegexOptions.IgnoreCase);
+        if (summaryMatch.Success)
+        {
+            summary = summaryMatch.Groups[1].Value
+                .Replace("\\\"", "\"")
+                .Replace("\\n", "\n")
+                .Replace("\\r", "\r")
+                .Replace("\\t", "\t");
+        }
+
+        if (score is null && summary is null)
+        {
+            return null;
+        }
+
+        return new LlmJsonPayload
+        {
+            AlignmentScore = score,
+            Summary = summary,
+            Flags = null
+        };
     }
 
     private static string Truncate(string s, int max) =>
@@ -371,6 +567,56 @@ public sealed partial class OllamaComparisonClient(
 
         [JsonPropertyName("max_tokens")]
         public int? MaxTokens { get; set; }
+
+        [JsonPropertyName("response_format")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public ResponseFormat? ResponseFormat { get; set; }
+    }
+
+    private sealed class ResponseFormat
+    {
+        [JsonPropertyName("type")]
+        public string Type { get; set; } = "json_object";
+    }
+
+    private sealed class NativeChatRequest
+    {
+        [JsonPropertyName("model")]
+        public string Model { get; set; } = "";
+
+        [JsonPropertyName("messages")]
+        public List<NativeChatMessage> Messages { get; set; } = [];
+
+        [JsonPropertyName("stream")]
+        public bool Stream { get; set; }
+
+        [JsonPropertyName("format")]
+        public string? Format { get; set; }
+
+        [JsonPropertyName("options")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public NativeChatOptions? Options { get; set; }
+    }
+
+    private sealed class NativeChatMessage
+    {
+        [JsonPropertyName("role")]
+        public string Role { get; set; } = "";
+
+        [JsonPropertyName("content")]
+        public string Content { get; set; } = "";
+    }
+
+    private sealed class NativeChatOptions
+    {
+        [JsonPropertyName("temperature")]
+        public double? Temperature { get; set; }
+
+        [JsonPropertyName("top_p")]
+        public double? TopP { get; set; }
+
+        [JsonPropertyName("num_predict")]
+        public int? NumPredict { get; set; }
     }
 
     private sealed class ChatMessage

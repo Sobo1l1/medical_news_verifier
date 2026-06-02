@@ -63,7 +63,7 @@
             @if (Model.LastAnalysis is null)
             {
                 <div class="d-flex flex-wrap gap-2 align-items-center">
-                    <button type="submit" id="newsAnalyzeSubmit" class="btn btn-primary" name="forceNew" value="false">Запустить анализ</button>
+                    <button type="submit" id="newsAnalyzeSubmit" class="btn btn-primary js-analysis-lockable" name="forceNew" value="false">Запустить анализ</button>
                 </div>
             }
         </form>
@@ -87,23 +87,8 @@
                 <div class="card-body">
                     <h4 class="mb-3">Результат анализа</h4>
 
-                    <!-- Кнопки действий -->
                     <div class="mb-3 d-flex flex-wrap gap-2">
-                        <form method="post" action="/Home/ExportPdf" style="display:inline;">
-                            @Html.AntiForgeryToken()
-                            <input type="hidden" name="id" value="@Model.LastAnalysis.Id" />
-                            <button type="submit" class="btn btn-success btn-sm">
-                                <i class="bi bi-download"></i> Скачать PDF
-                            </button>
-                        </form>
-                        <form method="post" action="/Home/ExportJson" style="display:inline;">
-                            @Html.AntiForgeryToken()
-                            <input type="hidden" name="id" value="@Model.LastAnalysis.Id" />
-                            <button type="submit" class="btn btn-info btn-sm">
-                                <i class="bi bi-file-code"></i> JSON
-                            </button>
-                        </form>
-                        <a href="/Home/Details/@Model.LastAnalysis.Id" class="btn btn-outline-secondary btn-sm">
+                        <a href="/Home/Details/@Model.LastAnalysis.Id" class="btn btn-outline-secondary btn-sm js-analysis-lockable-nav">
                             <i class="bi bi-link"></i> Постоянная ссылка
                         </a>
                     </div>
@@ -329,7 +314,11 @@
             const hScore = document.getElementById('analysisHeuristicScore');
             const lScore = document.getElementById('analysisLlmScore');
             const cScore = document.getElementById('analysisCombinedScore');
+            const lockableButtons = Array.from(document.querySelectorAll('.js-analysis-lockable'));
+            const lockableNav = Array.from(document.querySelectorAll('.js-analysis-lockable-nav, .navbar a, a.nav-link'));
+            let analysisRunning = false;
             if (!form || !host || !analysisStartUrl) return;
+            const formControls = Array.from(form.querySelectorAll('input, textarea, select, button'));
 
             function statusUrl(jobId) {
                 return analysisStatusUrlTemplate.replace(statusJobPlaceholder, jobId);
@@ -338,28 +327,88 @@
                 return detailsUrlTemplate.replace(detailsIdPlaceholder, String(id));
             }
 
+            function setUiLocked(isLocked) {
+                lockableButtons.forEach((btn) => {
+                    btn.disabled = isLocked;
+                    btn.setAttribute('aria-disabled', isLocked ? 'true' : 'false');
+                });
+                formControls.forEach((control) => {
+                    if (isLocked) {
+                        control.setAttribute('data-analysis-was-disabled', control.disabled ? '1' : '0');
+                        control.disabled = true;
+                    } else {
+                        const wasDisabled = control.getAttribute('data-analysis-was-disabled') === '1';
+                        control.disabled = wasDisabled;
+                        control.removeAttribute('data-analysis-was-disabled');
+                    }
+                });
+                lockableNav.forEach((link) => {
+                    link.style.pointerEvents = isLocked ? 'none' : '';
+                    link.style.opacity = isLocked ? '0.55' : '';
+                    link.setAttribute('aria-disabled', isLocked ? 'true' : 'false');
+                    if (isLocked) {
+                        link.setAttribute('tabindex', '-1');
+                    } else {
+                        link.removeAttribute('tabindex');
+                    }
+                });
+            }
+
+            function updateProgressUi(state) {
+                const phase = state?.phase ?? '';
+                const hasHeuristic = typeof state?.heuristicScore === 'number';
+                const hasLlm = typeof state?.llmScore === 'number';
+                const hasCombined = typeof state?.combinedScore === 'number';
+
+                hScore.textContent = hasHeuristic
+                    ? state.heuristicScore + '/100'
+                    : 'Выполняется…';
+                lScore.textContent = hasLlm
+                    ? state.llmScore + '/100'
+                    : hasHeuristic
+                        ? 'Нейросетевой этап в работе…'
+                        : 'Ожидание…';
+                cScore.textContent = hasCombined
+                    ? state.combinedScore + '/100'
+                    : hasHeuristic
+                        ? 'Формируется итог…'
+                        : 'Ожидание…';
+
+                if (phase === 'HeuristicReady') {
+                    msg.textContent = 'Первичный (эвристический + Python) анализ уже готов. Нейросетевой этап продолжается…';
+                } else if (phase === 'LlmReady') {
+                    msg.textContent = 'Нейросетевой этап завершён. Формируется итоговый вывод…';
+                } else if (state?.message) {
+                    msg.textContent = state.message;
+                }
+            }
+
             form.addEventListener('submit', async function (e) {
                 const submitter = e.submitter;
-                if (submitter && submitter.getAttribute('name') === 'forceNew' && submitter.value === 'true') {
+                e.preventDefault();
+                if (analysisRunning) {
+                    msg.classList.remove('text-danger');
+                    msg.textContent = 'Проверка уже выполняется. Дождитесь завершения текущего запуска.';
                     return;
                 }
-
-                e.preventDefault();
                 if (!form.checkValidity()) {
                     form.reportValidity();
                     return;
                 }
+                analysisRunning = true;
+                setUiLocked(true);
 
                 host.classList.remove('d-none');
                 msg.textContent = 'Отправка запроса…';
                 msg.classList.remove('text-danger');
-                hScore.textContent = '…';
-                lScore.textContent = '…';
-                cScore.textContent = '…';
+                hScore.textContent = 'Ожидание…';
+                lScore.textContent = 'Ожидание…';
+                cScore.textContent = 'Ожидание…';
 
                 const payload = {
                     headline: document.querySelector('[name="Input.Headline"]')?.value ?? '',
                     newsText: document.querySelector('[name="Input.NewsText"]')?.value ?? '',
+                    forceNew: submitter && submitter.getAttribute('name') === 'forceNew' && submitter.value === 'true',
                     sourceUrl: (() => {
                         const v = document.querySelector('[name="Input.SourceUrl"]')?.value?.trim() ?? '';
                         return v === '' ? null : v;
@@ -399,6 +448,8 @@
                     }
                     msg.classList.add('text-danger');
                     msg.textContent = 'Не удалось запустить анализ: ' + detail;
+                    analysisRunning = false;
+                    setUiLocked(false);
                     return;
                 }
 
@@ -407,6 +458,8 @@
                 if (!jobId) {
                     msg.classList.add('text-danger');
                     msg.textContent = 'Сервер не вернул идентификатор задания.';
+                    analysisRunning = false;
+                    setUiLocked(false);
                     return;
                 }
                 msg.textContent = 'Анализ запущен, ожидайте этапы…';
@@ -416,24 +469,27 @@
                     if (!st.ok) {
                         clearInterval(timer);
                         msg.textContent = 'Статус анализа недоступен (HTTP ' + st.status + ').';
+                        analysisRunning = false;
+                        setUiLocked(false);
                         return;
                     }
                     const s = await st.json();
-                    if (s.message) msg.textContent = s.message;
-                    if (typeof s.heuristicScore === 'number') hScore.textContent = s.heuristicScore + '/100';
-                    if (typeof s.llmScore === 'number') lScore.textContent = s.llmScore + '/100';
-                    else if (s.phase === 'Completed' && s.llmScore === null) lScore.textContent = '—';
-                    if (typeof s.combinedScore === 'number') cScore.textContent = s.combinedScore + '/100';
+                    updateProgressUi(s);
 
                     if (s.phase === 'Completed') {
                         clearInterval(timer);
+                        analysisRunning = false;
                         if (s.recordId) {
                             window.location.href = detailsUrl(s.recordId);
+                        } else {
+                            setUiLocked(false);
                         }
                     }
                     if (s.phase === 'Failed') {
                         clearInterval(timer);
                         msg.textContent = 'Ошибка: ' + (s.error || 'неизвестно');
+                        analysisRunning = false;
+                        setUiLocked(false);
                     }
                 }, 450);
             });

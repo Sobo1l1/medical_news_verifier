@@ -17,6 +17,8 @@ public class AnalyzeNewsInputModel : IValidatableObject
     [Display(Name = "Ссылка на публикацию")]
     public string? SourceUrl { get; set; }
 
+    public bool ForceNew { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (string.IsNullOrWhiteSpace(SourceUrl))

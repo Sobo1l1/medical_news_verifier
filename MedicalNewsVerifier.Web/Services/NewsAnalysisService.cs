@@ -55,22 +55,26 @@ public partial class NewsAnalysisService(
                 s.Message = "Загрузка корпуса доверенных материалов и источников…";
             });
 
-            var (existing, matches) = await TryReuseExistingRecordAsync(input, cancellationToken);
-            if (existing is not null)
+            var forceNew = input.ForceNew;
+            if (!forceNew)
             {
-                jobStore.Patch(jobId, s =>
+                var (existing, matches) = await TryReuseExistingRecordAsync(input, cancellationToken);
+                if (existing is not null)
                 {
-                    s.Phase = "Completed";
-                    s.Message = "Найдена сохранённая проверка с теми же заголовком и текстом.";
-                    s.HeuristicScore = existing.HeuristicReliabilityScore > 0
-                        ? existing.HeuristicReliabilityScore
-                        : existing.ReliabilityScore;
-                    s.LlmScore = existing.LlmAlignmentScore;
-                    s.CombinedScore = existing.ReliabilityScore;
-                    s.RecordId = existing.Id;
-                    s.LlmSummaryPreview = existing.LlmSummary;
-                });
-                return;
+                    jobStore.Patch(jobId, s =>
+                    {
+                        s.Phase = "Completed";
+                        s.Message = "Найдена сохранённая проверка с теми же заголовком и текстом.";
+                        s.HeuristicScore = existing.HeuristicReliabilityScore > 0
+                            ? existing.HeuristicReliabilityScore
+                            : existing.ReliabilityScore;
+                        s.LlmScore = existing.LlmAlignmentScore;
+                        s.CombinedScore = existing.ReliabilityScore;
+                        s.RecordId = existing.Id;
+                        s.LlmSummaryPreview = existing.LlmSummary;
+                    });
+                    return;
+                }
             }
 
             var maxCorpusSnippets = configuration.GetValue("Ollama:MaxCorpusSnippets", 4);
@@ -167,57 +171,80 @@ public partial class NewsAnalysisService(
             });
         }
 
+        var (lexical, lexicalFragments) = AnalyzeLexicalWithSpans(fullText, lexicons);
         var pythonTask = pythonClient.AnalyzeAsync(fullText, cancellationToken);
         var llmTask = ollamaClient.CompareNewsToCorpusAsync(input.Headline, input.NewsText, corpusForLlm, cancellationToken);
-        await Task.WhenAll(pythonTask, llmTask);
 
-        var pythonOutcome = await pythonTask;
-        var llmOutcome = await llmTask;
+        PythonAnalysisOutcome? pythonOutcome = null;
+        OllamaComparisonOutcome? llmOutcome = null;
+        int? heuristicScore = null;
+        var pending = new List<Task> { pythonTask, llmTask };
 
-        if (jobId.HasValue)
+        while (pending.Count > 0)
         {
-            jobStore.Patch(jobId.Value, s =>
+            var finished = await Task.WhenAny(pending);
+            pending.Remove(finished);
+
+            if (finished == pythonTask)
             {
-                s.LlmScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null;
-                s.LlmSummaryPreview = llmOutcome.Succeeded
-                    ? TruncateForJob(llmOutcome.Summary)
-                    : TruncateForJob(llmOutcome.ErrorMessage);
-                s.Message = llmOutcome.Succeeded
-                    ? "Локальная модель (Ollama) завершила сравнение с корпусом."
-                    : "Сравнение через Ollama завершилось с ошибкой или отключено; итог будет по эвристике.";
-            });
+                pythonOutcome = await pythonTask;
+                var pythonFragments = pythonOutcome.Fragments;
+                heuristicScore = Math.Clamp(
+                    CalculateScore(weights, lexical, pythonFragments, matches),
+                    0,
+                    100);
+
+                if (jobId.HasValue)
+                {
+                    jobStore.Patch(jobId.Value, s =>
+                    {
+                        s.Phase = "HeuristicReady";
+                        s.HeuristicScore = heuristicScore;
+                        s.Message = "Эвристический и Python-анализ завершены. Формируем итог с учётом нейросети…";
+                    });
+                }
+            }
+            else if (finished == llmTask)
+            {
+                llmOutcome = await llmTask;
+                if (jobId.HasValue)
+                {
+                    jobStore.Patch(jobId.Value, s =>
+                    {
+                        s.Phase = "LlmReady";
+                        s.LlmScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null;
+                        s.LlmSummaryPreview = llmOutcome.Succeeded
+                            ? TruncateForJob(llmOutcome.Summary)
+                            : TruncateForJob(llmOutcome.ErrorMessage);
+                        s.Message = llmOutcome.Succeeded
+                            ? "Нейросетевой этап завершён. Собираем итоговый результат…"
+                            : "Нейросетевой этап завершился с ошибкой; итог будет по эвристике.";
+                    });
+                }
+            }
         }
 
-        var (lexical, lexicalFragments) = AnalyzeLexicalWithSpans(fullText, lexicons);
-        var pythonFragments = pythonOutcome.Fragments;
+        pythonOutcome ??= await pythonTask;
+        llmOutcome ??= await llmTask;
+        heuristicScore ??= Math.Clamp(
+            CalculateScore(weights, lexical, pythonOutcome.Fragments, matches),
+            0,
+            100);
 
         var fragments = DeduplicateIdenticalSpans(
             CapFragments(
                 lexicalFragments
-                    .Concat(MapPythonFragments(pythonFragments))
+                    .Concat(MapPythonFragments(pythonOutcome.Fragments))
                     .ToList()));
 
-        var heuristicScore = Math.Clamp(
-            CalculateScore(weights, lexical, pythonFragments, matches),
-            0,
-            100);
-
-        if (jobId.HasValue)
-        {
-            jobStore.Patch(jobId.Value, s =>
-            {
-                s.HeuristicScore = heuristicScore;
-                s.Message = "Эвристический анализ завершён. Формируется итоговая оценка…";
-            });
-        }
-
-        var (combinedScore, status) = CombineHeuristicAndLlm(heuristicScore, llmOutcome);
+        var (combinedScore, status) = CombineHeuristicAndLlm(heuristicScore.Value, llmOutcome);
 
         var record = BuildAnalysisRecord(
             input,
-            heuristicScore,
+            heuristicScore.Value,
             llmOutcome,
             combinedScore,
+            status,
             fragments,
             matches,
             lexical,
@@ -243,6 +270,7 @@ public partial class NewsAnalysisService(
         int heuristicScore,
         OllamaComparisonOutcome llmOutcome,
         int combinedScore,
+        VerificationStatus status,
         List<SuspiciousFragment> fragments,
         List<OfficialPublicationMatchVm> matches,
         LexicalFeatures lexical,
@@ -257,6 +285,7 @@ public partial class NewsAnalysisService(
             LlmAlignmentScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null,
             LlmSummary = BuildLlmSummaryLine(llmOutcome),
             ReliabilityScore = combinedScore,
+            Status = status,
             Explanation = BuildExplanation(
                 combinedScore,
                 heuristicScore,
@@ -339,7 +368,7 @@ public partial class NewsAnalysisService(
             var s = string.IsNullOrWhiteSpace(llm.Summary)
                 ? $"Модель: alignmentScore={llm.AlignmentScore}."
                 : llm.Summary.Trim();
-            return s.Length > 3900 ? s[..3900] + "…" : s;
+            return s.Length > 8000 ? s[..7997] + "…" : s;
         }
 
         return string.IsNullOrWhiteSpace(llm.ErrorMessage) ? "Ollama: ошибка без сообщения." : $"Ollama: {llm.ErrorMessage}";
@@ -614,7 +643,7 @@ public partial class NewsAnalysisService(
     [GeneratedRegex(@"https?://\S+|www\.\S+", RegexOptions.IgnoreCase)]
     private static partial Regex LinksRegex();
 
-    [GeneratedRegex(@"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{4}\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b(?:19|20)\d{2}\b", RegexOptions.IgnoreCase)]
     private static partial Regex DatesRegex();
 
     [GeneratedRegex(@"\d")]

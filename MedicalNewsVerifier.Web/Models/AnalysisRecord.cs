@@ -28,8 +28,13 @@ public class AnalysisRecord
     [MaxLength(8000)]
     public string? LlmSummary { get; set; }
 
+    /// <summary>
+    /// Статус проверки, сохраняемый в БД (нужен для истории/экспорта).
+    /// </summary>
+    public VerificationStatus Status { get; set; } = VerificationStatus.NeedsReview;
+
     [NotMapped]
-    public VerificationStatus Status => ReliabilityScore switch
+    public VerificationStatus ComputedStatus => ReliabilityScore switch
     {
         >= 70 => VerificationStatus.LikelyReliable,
         <= 40 => VerificationStatus.Suspicious,

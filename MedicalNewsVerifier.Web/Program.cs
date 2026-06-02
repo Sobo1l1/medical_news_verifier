@@ -29,7 +29,6 @@ builder.Services.AddHttpClient<IOllamaComparisonClient, OllamaComparisonClient>(
 builder.Services.AddScoped<IPythonLinguisticClient, PythonLinguisticClient>();
 builder.Services.AddHttpClient<IOfficialSourceFetcher, OfficialSourceFetcher>();
 builder.Services.AddScoped<INewsAnalysisService, NewsAnalysisService>();
-builder.Services.AddScoped<IAnalysisReportExporter, AnalysisReportExporter>();
 
 var app = builder.Build();
 

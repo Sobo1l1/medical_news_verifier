@@ -164,54 +164,6 @@ public class HomeController(ILogger<HomeController> logger, INewsAnalysisService
         return RedirectToAction(nameof(History));
     }
 
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> ExportPdf(int id, CancellationToken cancellationToken)
-    {
-        var record = await analysisService.GetAnalysisByIdAsync(id, cancellationToken);
-        if (record is null)
-            return NotFound();
-
-        var exporter = HttpContext.RequestServices.GetRequiredService<IAnalysisReportExporter>();
-        var pdf = exporter.GeneratePdf(record);
-        
-        return File(pdf, "application/pdf", $"report_{record.Id}_{DateTime.Now:yyyy-MM-dd_HHmm}.pdf");
-    }
-
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> ExportJson(int id, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var record = await analysisService.GetAnalysisByIdAsync(id, cancellationToken);
-            if (record is null)
-                return NotFound();
-
-            // Простой JSON с основной информацией
-            var simpleJson = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                id = record.Id,
-                headline = record.Headline,
-                status = record.Status.ToString(),
-                overallScore = record.ReliabilityScore,
-                heuristicScore = record.HeuristicReliabilityScore,
-                llmScore = record.LlmAlignmentScore,
-                explanation = record.Explanation,
-                createdAtUtc = record.CreatedAtUtc,
-                fragmentCount = record.SuspiciousFragments.Count
-            }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-            
-            var jsonBytes = System.Text.Encoding.UTF8.GetBytes(simpleJson);
-            return File(jsonBytes, "application/json", $"report_{record.Id}_{DateTime.Now:yyyy-MM-dd_HHmm}.json");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error exporting JSON for record {Id}", id);
-            return StatusCode(500, $"Error exporting JSON: {ex.Message}");
-        }
-    }
-
     private static void PopulateMarkup(AnalyzeResultViewModel vm, AnalysisRecord record)
     {
         var doc = AnalyzedDocument.From(record.Headline, record.NewsText);

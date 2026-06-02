@@ -16,6 +16,7 @@ public static class DatabaseSchemaPatcher
         ApplyOfficialPublicationMatchesTable(db);
         ApplyTrustedSourcesTable(db);
         ApplyAnalysisRecordLlmColumns(db);
+        ApplyAnalysisRecordStatusColumn(db);
     }
 
     public static void ApplyTrustedSourcesTable(AppDbContext db)
@@ -61,11 +62,39 @@ public static class DatabaseSchemaPatcher
             db.Database.ExecuteSqlRaw(
                 """ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "LlmAlignmentScore" integer NULL;""");
             db.Database.ExecuteSqlRaw(
-                """ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "LlmSummary" character varying(4000) NULL;""");
+                """ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "LlmSummary" character varying(8000) NULL;""");
+            db.Database.ExecuteSqlRaw(
+                """ALTER TABLE "AnalysisRecords" ALTER COLUMN "LlmSummary" TYPE character varying(8000);""");
         }
         catch
         {
             // Таблица ещё не создана или колонки уже есть с другим типом — пропускаем.
+        }
+    }
+
+    public static void ApplyAnalysisRecordStatusColumn(AppDbContext db)
+    {
+        if (db.Database.ProviderName is null ||
+            !db.Database.ProviderName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            // На старых БД колонка могла быть добавлена без DEFAULT и/или с NULL-значениями.
+            db.Database.ExecuteSqlRaw(
+                """ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "Status" integer NOT NULL DEFAULT 0;""");
+            db.Database.ExecuteSqlRaw(
+                """UPDATE "AnalysisRecords" SET "Status" = 0 WHERE "Status" IS NULL;""");
+            db.Database.ExecuteSqlRaw(
+                """ALTER TABLE "AnalysisRecords" ALTER COLUMN "Status" SET DEFAULT 0;""");
+            db.Database.ExecuteSqlRaw(
+                """ALTER TABLE "AnalysisRecords" ALTER COLUMN "Status" SET NOT NULL;""");
+        }
+        catch
+        {
+            // Игнорируем: при отсутствии прав или нестандартной схеме приложение всё равно должно стартовать.
         }
     }
 
