@@ -28,6 +28,11 @@ public sealed class OllamaOptions
     /// Предпочитать нативный Ollama API (/api/chat) с format="json" (самый надёжный способ получить JSON без thinking).
     /// </summary>
     public bool PreferNativeApi { get; set; } = true;
+
+    /// <summary>
+    /// Включить режим «thinking» у моделей вроде Qwen3. Для JSON-ответов рекомендуется false.
+    /// </summary>
+    public bool EnableThinking { get; set; }
 }
 
 public sealed partial class OllamaComparisonClient(
@@ -90,8 +95,11 @@ public sealed partial class OllamaComparisonClient(
             """
             Ты — медицинский фактчекер. Сравни новость с выдержками корпуса; если корпус недостаточен, опирайся на общепринятые медицинские знания.
 
-            Верни строго один валидный JSON-объект (без markdown/пояснений):
-            {"alignmentScore":0-100,"summary":"<русский краткий вывод>","flags":["snake_case"]}
+            Верни строго один валидный JSON-объект (без markdown, без пояснений до/после JSON).
+            Поле summary — 2–4 конкретных предложения на русском языке о согласованности новости с корпусом; не используй шаблоны и placeholder-текст.
+
+            Пример формата:
+            {"alignmentScore":65,"summary":"Новость частично согласуется с корпусом, но отдельные утверждения требуют проверки по первоисточникам.","flags":["requires_verification"]}
 
             Примеры flags: insufficient_corpus, requires_verification, possible_contradiction, unsupported_claims, accurate.
             """;
@@ -130,10 +138,17 @@ public sealed partial class OllamaComparisonClient(
                 score = Math.Clamp(score.Value, 0, 100);
             }
 
-            var summary = parsed.Summary?.Trim();
+            var summary = NormalizeSummary(parsed.Summary);
             if (summary?.Length > 8000)
             {
                 summary = summary[..7997] + "…";
+            }
+
+            if (string.IsNullOrWhiteSpace(summary) && score.HasValue)
+            {
+                logger.LogWarning(
+                    "Ollama: JSON распознан (score={Score}), но summary пустой или шаблонный",
+                    score);
             }
 
             return new OllamaComparisonOutcome
@@ -245,6 +260,7 @@ public sealed partial class OllamaComparisonClient(
             Temperature = 0.2,
             TopP = 0.9,
             MaxTokens = opt.MaxResponseTokens,
+            Think = opt.EnableThinking ? null : false,
             ResponseFormat = opt.ForceJsonResponseFormat ? new ResponseFormat { Type = "json_object" } : null,
             Messages =
             [
@@ -289,12 +305,10 @@ public sealed partial class OllamaComparisonClient(
 
         if (string.IsNullOrWhiteSpace(content) && !string.IsNullOrWhiteSpace(reasoning))
         {
-            logger.LogWarning("Ollama: content пуст, используем reasoning поле (длина {Length})", reasoning.Length);
+            logger.LogWarning("Ollama: content пуст, пробуем извлечь JSON из reasoning (длина {Length})", reasoning.Length);
         }
 
-        var parseInput = string.IsNullOrWhiteSpace(reasoning)
-            ? content
-            : $"{content}\n\n{reasoning}";
+        var parseInput = SelectParseInput(content, reasoning);
 
         return (parseInput, parseInput.Length);
     }
@@ -318,6 +332,7 @@ public sealed partial class OllamaComparisonClient(
             Model = opt.Model.Trim(),
             Stream = false,
             Format = "json",
+            Think = opt.EnableThinking,
             Messages =
             [
                 new NativeChatMessage { Role = "system", Content = systemPrompt },
@@ -347,14 +362,27 @@ public sealed partial class OllamaComparisonClient(
         }
 
         using var doc = JsonDocument.Parse(body);
-        if (!doc.RootElement.TryGetProperty("message", out var msg) ||
-            !msg.TryGetProperty("content", out var contentProp))
+        if (!doc.RootElement.TryGetProperty("message", out var msg))
         {
             logger.LogWarning("Ollama: некорректная структура ответа (native /api/chat)");
             return string.Empty;
         }
 
-        return contentProp.GetString() ?? string.Empty;
+        var content = msg.TryGetProperty("content", out var contentProp)
+            ? contentProp.GetString() ?? string.Empty
+            : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(content) && msg.TryGetProperty("thinking", out var thinkingProp))
+        {
+            var thinking = thinkingProp.GetString() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(thinking))
+            {
+                logger.LogWarning("Ollama native: content пуст, пробуем JSON из thinking (длина {Length})", thinking.Length);
+                content = thinking;
+            }
+        }
+
+        return content;
     }
 
     private static string BuildCorpusBlock(IReadOnlyList<OfficialPublication> corpus, int maxSnippets, int maxChars)
@@ -406,6 +434,7 @@ public sealed partial class OllamaComparisonClient(
 
         // Пробуем распарсить любой валидный JSON-объект из ответа (с разрешением trailing commas).
         LlmJsonPayload? firstParsed = null;
+        LlmJsonPayload? bestParsed = null;
         foreach (var json in ExtractJsonObjects(trimmed))
         {
             var parsed = TryDeserializePayload(json);
@@ -414,11 +443,23 @@ public sealed partial class OllamaComparisonClient(
                 continue;
             }
 
+            parsed.Summary = NormalizeSummary(parsed.Summary);
             firstParsed ??= parsed;
-            if (parsed.AlignmentScore is not null)
+
+            if (parsed.AlignmentScore is not null && !string.IsNullOrWhiteSpace(parsed.Summary))
             {
                 return parsed;
             }
+
+            if (parsed.AlignmentScore is not null)
+            {
+                bestParsed = parsed;
+            }
+        }
+
+        if (bestParsed is not null)
+        {
+            return bestParsed;
         }
 
         // Если JSON валиден, но alignmentScore не нашли — всё равно вернём первый распарсенный объект.
@@ -515,11 +556,11 @@ public sealed partial class OllamaComparisonClient(
         var summaryMatch = Regex.Match(s, "\"summary\"\\s*:\\s*\"((?:\\\\\"|[^\"])*)\"", RegexOptions.IgnoreCase);
         if (summaryMatch.Success)
         {
-            summary = summaryMatch.Groups[1].Value
+            summary = NormalizeSummary(summaryMatch.Groups[1].Value
                 .Replace("\\\"", "\"")
                 .Replace("\\n", "\n")
                 .Replace("\\r", "\r")
-                .Replace("\\t", "\t");
+                .Replace("\\t", "\t"));
         }
 
         if (score is null && summary is null)
@@ -535,8 +576,45 @@ public sealed partial class OllamaComparisonClient(
         };
     }
 
+    private static string SelectParseInput(string content, string reasoning)
+    {
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            return content.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(reasoning) ? string.Empty : reasoning.Trim();
+    }
+
+    private static string? NormalizeSummary(string? summary)
+    {
+        if (string.IsNullOrWhiteSpace(summary))
+        {
+            return null;
+        }
+
+        var s = summary.Trim();
+        return IsTemplatePlaceholderSummary(s) ? null : s;
+    }
+
+    private static bool IsTemplatePlaceholderSummary(string summary)
+    {
+        if (TemplatePlaceholderRegex().IsMatch(summary))
+        {
+            return true;
+        }
+
+        var lower = summary.ToLowerInvariant();
+        return lower.Contains("brief conclusion", StringComparison.Ordinal)
+               || (lower.Contains('<') && lower.Contains("кратк") && lower.Contains("вывод"))
+               || lower is "summary" or "вывод" or "snake_case";
+    }
+
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..max] + "…";
+
+    [GeneratedRegex(@"^<[^>]{1,120}>$", RegexOptions.CultureInvariant)]
+    private static partial Regex TemplatePlaceholderRegex();
 
     [GeneratedRegex(@"^```(?:json)?\s*|\s*```$", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
     private static partial Regex MarkdownFenceRegex();
@@ -571,6 +649,10 @@ public sealed partial class OllamaComparisonClient(
         [JsonPropertyName("response_format")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public ResponseFormat? ResponseFormat { get; set; }
+
+        [JsonPropertyName("think")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Think { get; set; }
     }
 
     private sealed class ResponseFormat
@@ -592,6 +674,9 @@ public sealed partial class OllamaComparisonClient(
 
         [JsonPropertyName("format")]
         public string? Format { get; set; }
+
+        [JsonPropertyName("think")]
+        public bool Think { get; set; }
 
         [JsonPropertyName("options")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

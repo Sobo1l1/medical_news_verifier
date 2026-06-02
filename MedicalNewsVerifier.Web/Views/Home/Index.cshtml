@@ -87,12 +87,6 @@
                 <div class="card-body">
                     <h4 class="mb-3">Результат анализа</h4>
 
-                    <div class="mb-3 d-flex flex-wrap gap-2">
-                        <a href="/Home/Details/@Model.LastAnalysis.Id" class="btn btn-outline-secondary btn-sm js-analysis-lockable-nav">
-                            <i class="bi bi-link"></i> Постоянная ссылка
-                        </a>
-                    </div>
-
                     @if (Model.OpenedFromHistory)
                     {
                         <div class="alert alert-info py-2">
