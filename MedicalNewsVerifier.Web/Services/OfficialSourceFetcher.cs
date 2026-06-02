@@ -49,7 +49,7 @@ public partial class OfficialSourceFetcher(
 
             return new OfficialPublication
             {
-                OfficialSource = new OfficialSource { Name = GetSourceName(url) },
+                TrustedSource = new TrustedSource { Name = GetSourceName(url), BaseUrl = url, IsEnabled = true },
                 Title = ExtractTitle(html),
                 Url = url,
                 Content = content[..Math.Min(content.Length, 5000)],

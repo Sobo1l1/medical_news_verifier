@@ -7,45 +7,22 @@ public static class SeedData
     public static void Initialize(AppDbContext db)
     {
         SeedTrustedSources(db);
-        SeedOfficialSourcesAndPublications(db);
+        SeedCorpusPublications(db);
     }
 
-    private static void SeedOfficialSourcesAndPublications(AppDbContext db)
+    private static void SeedCorpusPublications(AppDbContext db)
     {
-        if (!db.OfficialSources.Any())
-        {
-            db.OfficialSources.AddRange(
-                new OfficialSource
-                {
-                    Name = "WHO",
-                    BaseUrl = "https://www.who.int/"
-                },
-                new OfficialSource
-                {
-                    Name = "Минздрав РФ",
-                    BaseUrl = "https://minzdrav.gov.ru/"
-                },
-                new OfficialSource
-                {
-                    Name = "CDC",
-                    BaseUrl = "https://www.cdc.gov/"
-                });
-            db.SaveChanges();
-        }
-
         if (db.OfficialPublications.Any())
         {
             return;
         }
 
-        var who = db.OfficialSources.First(s => s.Name == "WHO");
-        var minzdrav = db.OfficialSources.First(s => s.Name == "Минздрав РФ");
-        var cdc = db.OfficialSources.First(s => s.Name == "CDC");
+        EnsureCorpusSources(db, out var who, out var minzdrav, out var cdc);
 
         db.OfficialPublications.AddRange(
             new OfficialPublication
             {
-                OfficialSource = who,
+                TrustedSource = who,
                 Title = "WHO updates guidance on respiratory infections",
                 Content = "The World Health Organization confirms that preventive measures include vaccination, hand hygiene and targeted diagnostics.",
                 Url = "https://www.who.int/",
@@ -53,7 +30,7 @@ public static class SeedData
             },
             new OfficialPublication
             {
-                OfficialSource = minzdrav,
+                TrustedSource = minzdrav,
                 Title = "Разъяснение по профилактике сезонных вирусных заболеваний",
                 Content = "Официальная рекомендация содержит данные о вакцинации, наблюдении у врача и недопустимости самолечения.",
                 Url = "https://minzdrav.gov.ru/",
@@ -61,13 +38,25 @@ public static class SeedData
             },
             new OfficialPublication
             {
-                OfficialSource = cdc,
+                TrustedSource = cdc,
                 Title = "Evidence update on vaccine safety",
                 Content = "CDC reports that severe side effects are rare and vaccination significantly reduces severe outcomes.",
                 Url = "https://www.cdc.gov/",
                 PublishedAtUtc = DateTime.UtcNow.AddDays(-20)
             });
 
+        db.SaveChanges();
+    }
+
+    private static void EnsureCorpusSources(
+        AppDbContext db,
+        out TrustedSource who,
+        out TrustedSource minzdrav,
+        out TrustedSource cdc)
+    {
+        who = GetOrCreateSource(db, "WHO", "https://www.who.int/");
+        minzdrav = GetOrCreateSource(db, "Минздрав РФ", "https://minzdrav.gov.ru/");
+        cdc = GetOrCreateSource(db, "CDC", "https://www.cdc.gov/");
         db.SaveChanges();
     }
 
@@ -131,5 +120,24 @@ public static class SeedData
             });
 
         db.SaveChanges();
+    }
+
+    private static TrustedSource GetOrCreateSource(AppDbContext db, string name, string baseUrl)
+    {
+        var existing = db.TrustedSources.FirstOrDefault(s => s.Name == name);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var source = new TrustedSource
+        {
+            Name = name,
+            BaseUrl = baseUrl,
+            IsEnabled = true,
+            SortOrder = 0
+        };
+        db.TrustedSources.Add(source);
+        return source;
     }
 }

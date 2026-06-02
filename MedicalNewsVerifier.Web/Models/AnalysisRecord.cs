@@ -7,16 +7,20 @@ public class AnalysisRecord
 {
     public int Id { get; set; }
 
-    [MaxLength(500)]
-    public string Headline { get; set; } = string.Empty;
+    public int NewsSubmissionId { get; set; }
 
-    [MaxLength(15000)]
-    public string NewsText { get; set; } = string.Empty;
+    public NewsSubmission? NewsSubmission { get; set; }
 
-    [MaxLength(500)]
-    public string? SourceUrl { get; set; }
+    [NotMapped]
+    public string Headline => NewsSubmission?.Headline ?? string.Empty;
 
-    /// <summary>Итоговая (комбинированная) оценка 0–100, по которой определяется статус.</summary>
+    [NotMapped]
+    public string NewsText => NewsSubmission?.NewsText ?? string.Empty;
+
+    [NotMapped]
+    public string? SourceUrl => NewsSubmission?.SourceUrl;
+
+    /// <summary>Итоговая (комбинированная) оценка 0–100.</summary>
     public int ReliabilityScore { get; set; }
 
     /// <summary>Оценка эвристики (лексика, Python, совпадения с корпусом).</summary>
@@ -28,10 +32,8 @@ public class AnalysisRecord
     [MaxLength(8000)]
     public string? LlmSummary { get; set; }
 
-    /// <summary>
-    /// Статус проверки, сохраняемый в БД (нужен для истории/экспорта).
-    /// </summary>
-    public VerificationStatus Status { get; set; } = VerificationStatus.NeedsReview;
+    [NotMapped]
+    public VerificationStatus Status => ComputedStatus;
 
     [NotMapped]
     public VerificationStatus ComputedStatus => ReliabilityScore switch

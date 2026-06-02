@@ -1,118 +1,90 @@
-﻿using System;
-using Microsoft.EntityFrameworkCore.Migrations;
-using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace MedicalNewsVerifier.Web.Migrations
+namespace MedicalNewsVerifier.Web.Migrations;
+
+/// <inheritdoc />
+public partial class IncreaseExplanationAndSummaryFieldSizes : Migration
 {
     /// <inheritdoc />
-    public partial class IncreaseExplanationAndSummaryFieldSizes : Migration
+    protected override void Up(MigrationBuilder migrationBuilder)
     {
-        /// <inheritdoc />
-        protected override void Up(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.CreateTable(
-                name: "AnalysisRecords",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    Headline = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
-                    NewsText = table.Column<string>(type: "character varying(15000)", maxLength: 15000, nullable: false),
-                    SourceUrl = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
-                    ReliabilityScore = table.Column<int>(type: "integer", nullable: false),
-                    HeuristicReliabilityScore = table.Column<int>(type: "integer", nullable: false),
-                    LlmAlignmentScore = table.Column<int>(type: "integer", nullable: true),
-                    LlmSummary = table.Column<string>(type: "character varying(8000)", maxLength: 8000, nullable: true),
-                    Status = table.Column<int>(type: "integer", nullable: false),
-                    Explanation = table.Column<string>(type: "character varying(8000)", maxLength: 8000, nullable: false),
-                    CreatedAtUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_AnalysisRecords", x => x.Id);
-                });
+        migrationBuilder.Sql(
+            """
+            CREATE TABLE IF NOT EXISTS "AnalysisRecords" (
+                "Id" serial PRIMARY KEY,
+                "Headline" character varying(500) NOT NULL DEFAULT '',
+                "NewsText" character varying(15000) NOT NULL DEFAULT '',
+                "SourceUrl" character varying(500) NULL,
+                "ReliabilityScore" integer NOT NULL DEFAULT 0,
+                "Explanation" character varying(8000) NOT NULL DEFAULT '',
+                "CreatedAtUtc" timestamp with time zone NOT NULL DEFAULT now()
+            );
 
-            migrationBuilder.CreateTable(
-                name: "OfficialPublications",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    SourceName = table.Column<string>(type: "character varying(250)", maxLength: 250, nullable: false),
-                    Title = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
-                    Content = table.Column<string>(type: "character varying(5000)", maxLength: 5000, nullable: false),
-                    Url = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
-                    PublishedAtUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_OfficialPublications", x => x.Id);
-                });
+            ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "HeuristicReliabilityScore" integer NOT NULL DEFAULT 0;
+            ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "LlmAlignmentScore" integer NULL;
+            ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "LlmSummary" character varying(8000) NULL;
+            ALTER TABLE "AnalysisRecords" ADD COLUMN IF NOT EXISTS "Status" integer NOT NULL DEFAULT 0;
+            ALTER TABLE "AnalysisRecords" ALTER COLUMN "NewsText" TYPE character varying(15000);
+            ALTER TABLE "AnalysisRecords" ALTER COLUMN "Explanation" TYPE character varying(8000);
+            ALTER TABLE "AnalysisRecords" ALTER COLUMN "LlmSummary" TYPE character varying(8000);
 
-            migrationBuilder.CreateTable(
-                name: "TrustedSources",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    Name = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
-                    BaseUrl = table.Column<string>(type: "character varying(600)", maxLength: 600, nullable: false),
-                    AccessedOnUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
-                    IsEnabled = table.Column<bool>(type: "boolean", nullable: false),
-                    SortOrder = table.Column<int>(type: "integer", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_TrustedSources", x => x.Id);
-                });
+            CREATE TABLE IF NOT EXISTS "OfficialPublications" (
+                "Id" serial PRIMARY KEY,
+                "Title" character varying(500) NOT NULL DEFAULT '',
+                "Content" character varying(5000) NOT NULL DEFAULT '',
+                "Url" character varying(500) NOT NULL DEFAULT '',
+                "PublishedAtUtc" timestamp with time zone NOT NULL DEFAULT now()
+            );
+            ALTER TABLE "OfficialPublications" ADD COLUMN IF NOT EXISTS "SourceName" character varying(250) NOT NULL DEFAULT '';
 
-            migrationBuilder.CreateTable(
-                name: "SuspiciousFragments",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    FeatureKind = table.Column<int>(type: "integer", nullable: false),
-                    StartOffset = table.Column<int>(type: "integer", nullable: false),
-                    EndOffset = table.Column<int>(type: "integer", nullable: false),
-                    FragmentText = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: false),
-                    Reason = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
-                    Severity = table.Column<int>(type: "integer", nullable: false),
-                    AnalysisRecordId = table.Column<int>(type: "integer", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_SuspiciousFragments", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_SuspiciousFragments_AnalysisRecords_AnalysisRecordId",
-                        column: x => x.AnalysisRecordId,
-                        principalTable: "AnalysisRecords",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
+            CREATE TABLE IF NOT EXISTS "TrustedSources" (
+                "Id" serial PRIMARY KEY,
+                "Name" character varying(300) NOT NULL,
+                "BaseUrl" character varying(600) NOT NULL DEFAULT '',
+                "AccessedOnUtc" timestamp with time zone NULL,
+                "IsEnabled" boolean NOT NULL DEFAULT TRUE,
+                "SortOrder" integer NOT NULL DEFAULT 0
+            );
 
-            migrationBuilder.CreateIndex(
-                name: "IX_SuspiciousFragments_AnalysisRecordId",
-                table: "SuspiciousFragments",
-                column: "AnalysisRecordId");
-        }
+            CREATE TABLE IF NOT EXISTS "SuspiciousFragments" (
+                "Id" serial PRIMARY KEY,
+                "FeatureKind" integer NOT NULL DEFAULT 0,
+                "StartOffset" integer NOT NULL DEFAULT -1,
+                "EndOffset" integer NOT NULL DEFAULT -1,
+                "FragmentText" character varying(1000) NOT NULL DEFAULT '',
+                "Reason" character varying(300) NOT NULL DEFAULT '',
+                "Severity" integer NOT NULL DEFAULT 0,
+                "AnalysisRecordId" integer NOT NULL
+            );
 
-        /// <inheritdoc />
-        protected override void Down(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropTable(
-                name: "OfficialPublications");
+            ALTER TABLE "SuspiciousFragments" ADD COLUMN IF NOT EXISTS "FeatureKind" integer NOT NULL DEFAULT 0;
+            ALTER TABLE "SuspiciousFragments" ADD COLUMN IF NOT EXISTS "StartOffset" integer NOT NULL DEFAULT -1;
+            ALTER TABLE "SuspiciousFragments" ADD COLUMN IF NOT EXISTS "EndOffset" integer NOT NULL DEFAULT -1;
 
-            migrationBuilder.DropTable(
-                name: "SuspiciousFragments");
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'FK_SuspiciousFragments_AnalysisRecords_AnalysisRecordId'
+                ) THEN
+                    ALTER TABLE "SuspiciousFragments"
+                        ADD CONSTRAINT "FK_SuspiciousFragments_AnalysisRecords_AnalysisRecordId"
+                        FOREIGN KEY ("AnalysisRecordId") REFERENCES "AnalysisRecords" ("Id") ON DELETE CASCADE;
+                END IF;
+            END$$;
 
-            migrationBuilder.DropTable(
-                name: "TrustedSources");
+            CREATE INDEX IF NOT EXISTS "IX_SuspiciousFragments_AnalysisRecordId"
+                ON "SuspiciousFragments" ("AnalysisRecordId");
+            """);
+    }
 
-            migrationBuilder.DropTable(
-                name: "AnalysisRecords");
-        }
+    /// <inheritdoc />
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.DropTable(name: "OfficialPublications");
+        migrationBuilder.DropTable(name: "SuspiciousFragments");
+        migrationBuilder.DropTable(name: "TrustedSources");
+        migrationBuilder.DropTable(name: "AnalysisRecords");
     }
 }

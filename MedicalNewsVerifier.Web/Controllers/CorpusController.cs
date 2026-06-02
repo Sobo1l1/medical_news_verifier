@@ -13,7 +13,7 @@ public class CorpusController(AppDbContext db) : Controller
     public async Task<IActionResult> Index(CancellationToken cancellationToken)
     {
         var list = await db.OfficialPublications
-            .Include(p => p.OfficialSource)
+            .Include(p => p.TrustedSource)
             .AsNoTracking()
             .OrderByDescending(p => p.PublishedAtUtc)
             .Take(100)
@@ -29,20 +29,20 @@ public class CorpusController(AppDbContext db) : Controller
         if (!ModelState.IsValid)
         {
             var list = await db.OfficialPublications
-                .Include(p => p.OfficialSource)
+                .Include(p => p.TrustedSource)
                 .AsNoTracking()
                 .OrderByDescending(p => p.PublishedAtUtc).Take(100).ToListAsync(cancellationToken);
             return View("Index", new CorpusPageViewModel { Items = list, Input = input });
         }
 
         var sourceName = input.SourceName.Trim();
-        var source = await db.OfficialSources
-            .FirstOrDefaultAsync(s => s.Name == sourceName, cancellationToken) 
-            ?? new OfficialSource { Name = sourceName };
+        var source = await db.TrustedSources
+            .FirstOrDefaultAsync(s => s.Name == sourceName, cancellationToken)
+            ?? new TrustedSource { Name = sourceName, BaseUrl = input.Url.Trim(), IsEnabled = true };
 
         db.OfficialPublications.Add(new OfficialPublication
         {
-            OfficialSource = source,
+            TrustedSource = source,
             Title = input.Title.Trim(),
             Url = input.Url.Trim(),
             Content = input.Content.Trim(),

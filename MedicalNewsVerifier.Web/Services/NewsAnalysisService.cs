@@ -20,6 +20,7 @@ public partial class NewsAnalysisService(
 {
     public async Task<AnalysisRecord?> GetAnalysisByIdAsync(int id, CancellationToken cancellationToken) =>
         await db.AnalysisRecords
+            .Include(r => r.NewsSubmission)
             .Include(r => r.SuspiciousFragments)
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
@@ -124,18 +125,13 @@ public partial class NewsAnalysisService(
         AnalyzeNewsInputModel input,
         CancellationToken cancellationToken)
     {
-        var normalizedHeadline = Normalize(input.Headline);
-        var normalizedText = Normalize(input.NewsText);
-
-        var recentRecords = await db.AnalysisRecords
+        var fingerprint = NewsContentFingerprint.Compute(input.Headline, input.NewsText);
+        var existing = await db.AnalysisRecords
+            .Include(r => r.NewsSubmission)
             .Include(r => r.SuspiciousFragments)
+            .Where(r => r.NewsSubmission!.ContentFingerprint == fingerprint)
             .OrderByDescending(r => r.CreatedAtUtc)
-            .Take(200)
-            .ToListAsync(cancellationToken);
-
-        var existing = recentRecords.FirstOrDefault(r =>
-            Normalize(r.Headline) == normalizedHeadline &&
-            Normalize(r.NewsText) == normalizedText);
+            .FirstOrDefaultAsync(cancellationToken);
 
         if (existing is null)
         {
@@ -237,14 +233,14 @@ public partial class NewsAnalysisService(
                     .Concat(MapPythonFragments(pythonOutcome.Fragments))
                     .ToList()));
 
-        var (combinedScore, status) = CombineHeuristicAndLlm(heuristicScore.Value, llmOutcome);
+        var combinedScore = CombineHeuristicAndLlm(heuristicScore.Value, llmOutcome);
+        var submission = await GetOrCreateNewsSubmissionAsync(input, cancellationToken);
 
         var record = BuildAnalysisRecord(
-            input,
+            submission,
             heuristicScore.Value,
             llmOutcome,
             combinedScore,
-            status,
             fragments,
             matches,
             lexical,
@@ -265,12 +261,34 @@ public partial class NewsAnalysisService(
         return (record, matches);
     }
 
-    private AnalysisRecord BuildAnalysisRecord(
+    private async Task<NewsSubmission> GetOrCreateNewsSubmissionAsync(
         AnalyzeNewsInputModel input,
+        CancellationToken cancellationToken)
+    {
+        var fingerprint = NewsContentFingerprint.Compute(input.Headline, input.NewsText);
+        var existing = await db.NewsSubmissions
+            .FirstOrDefaultAsync(s => s.ContentFingerprint == fingerprint, cancellationToken);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var submission = new NewsSubmission
+        {
+            Headline = input.Headline.Trim(),
+            NewsText = input.NewsText.Trim(),
+            SourceUrl = string.IsNullOrWhiteSpace(input.SourceUrl) ? null : input.SourceUrl.Trim(),
+            ContentFingerprint = fingerprint
+        };
+        db.NewsSubmissions.Add(submission);
+        return submission;
+    }
+
+    private static AnalysisRecord BuildAnalysisRecord(
+        NewsSubmission submission,
         int heuristicScore,
         OllamaComparisonOutcome llmOutcome,
         int combinedScore,
-        VerificationStatus status,
         List<SuspiciousFragment> fragments,
         List<OfficialPublicationMatchVm> matches,
         LexicalFeatures lexical,
@@ -278,14 +296,11 @@ public partial class NewsAnalysisService(
     {
         return new AnalysisRecord
         {
-            Headline = input.Headline,
-            NewsText = input.NewsText,
-            SourceUrl = input.SourceUrl,
+            NewsSubmission = submission,
             HeuristicReliabilityScore = heuristicScore,
             LlmAlignmentScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null,
             LlmSummary = BuildLlmSummaryLine(llmOutcome),
             ReliabilityScore = combinedScore,
-            Status = status,
             Explanation = BuildExplanation(
                 combinedScore,
                 heuristicScore,
@@ -315,17 +330,11 @@ public partial class NewsAnalysisService(
         return t.Length <= max ? t : t[..max] + "…";
     }
 
-    private (int combined, VerificationStatus status) CombineHeuristicAndLlm(int heuristicScore, OllamaComparisonOutcome llmOutcome)
+    private int CombineHeuristicAndLlm(int heuristicScore, OllamaComparisonOutcome llmOutcome)
     {
         if (!llmOutcome.WasAttempted || !llmOutcome.Succeeded || !llmOutcome.AlignmentScore.HasValue)
         {
-            var statusOnlyHeuristic = heuristicScore switch
-            {
-                >= 70 => VerificationStatus.LikelyReliable,
-                <= 40 => VerificationStatus.Suspicious,
-                _ => VerificationStatus.NeedsReview
-            };
-            return (heuristicScore, statusOnlyHeuristic);
+            return heuristicScore;
         }
 
         var wh = configuration.GetValue("AnalysisScoring:HeuristicBlendWeight", 0.65);
@@ -342,16 +351,7 @@ public partial class NewsAnalysisService(
         wl /= sum;
 
         var combined = (int)Math.Round(wh * heuristicScore + wl * llmOutcome.AlignmentScore!.Value);
-        combined = Math.Clamp(combined, 0, 100);
-
-        var status = combined switch
-        {
-            >= 70 => VerificationStatus.LikelyReliable,
-            <= 40 => VerificationStatus.Suspicious,
-            _ => VerificationStatus.NeedsReview
-        };
-
-        return (combined, status);
+        return Math.Clamp(combined, 0, 100);
     }
 
     private static string? BuildLlmSummaryLine(OllamaComparisonOutcome llm)
@@ -391,7 +391,7 @@ public partial class NewsAnalysisService(
         {
             logger.LogInformation("No web sources fetched, fallback to database source list");
             fromWeb = await db.OfficialPublications
-                .Include(p => p.OfficialSource)
+                .Include(p => p.TrustedSource)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
         }
@@ -635,10 +635,7 @@ public partial class NewsAnalysisService(
         return "Дополнительный модуль (Python): выполнен успешно, дополнительных фрагментов не вернул; маркеры в тексте при этом могут полностью относиться к анализу приложения (C#).";
     }
 
-    private static string Normalize(string text) => MultiSpaceRegex().Replace(text.Trim().ToLowerInvariant(), " ");
-
-    [GeneratedRegex(@"\s+")]
-    private static partial Regex MultiSpaceRegex();
+    private static string Normalize(string text) => NewsContentFingerprint.Normalize(text);
 
     [GeneratedRegex(@"https?://\S+|www\.\S+", RegexOptions.IgnoreCase)]
     private static partial Regex LinksRegex();

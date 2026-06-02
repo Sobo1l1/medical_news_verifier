@@ -75,6 +75,7 @@ public class HomeController(ILogger<HomeController> logger, INewsAnalysisService
         const int pageSize = 20;
 
         var query = db.AnalysisRecords
+            .Include(r => r.NewsSubmission)
             .Include(r => r.SuspiciousFragments)
             .AsQueryable();
 
@@ -100,7 +101,7 @@ public class HomeController(ILogger<HomeController> logger, INewsAnalysisService
             query = query.Where(r => r.CreatedAtUtc < dateTo.Value.AddDays(1));
 
         if (!string.IsNullOrWhiteSpace(search))
-            query = query.Where(r => r.Headline.Contains(search));
+            query = query.Where(r => r.NewsSubmission!.Headline.Contains(search));
 
         // Подсчёт статистики (до пагинации)
         var totalCount = await query.CountAsync(cancellationToken);
@@ -115,7 +116,7 @@ public class HomeController(ILogger<HomeController> logger, INewsAnalysisService
             "DateAsc" => query.OrderBy(r => r.CreatedAtUtc),
             "ScoreDesc" => query.OrderByDescending(r => r.ReliabilityScore).ThenByDescending(r => r.CreatedAtUtc),
             "ScoreAsc" => query.OrderBy(r => r.ReliabilityScore).ThenByDescending(r => r.CreatedAtUtc),
-            "HeadlineAsc" => query.OrderBy(r => r.Headline).ThenByDescending(r => r.CreatedAtUtc),
+            "HeadlineAsc" => query.OrderBy(r => r.NewsSubmission!.Headline).ThenByDescending(r => r.CreatedAtUtc),
             _ => query.OrderByDescending(r => r.CreatedAtUtc)
         };
 

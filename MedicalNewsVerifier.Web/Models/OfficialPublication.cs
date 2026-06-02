@@ -7,12 +7,12 @@ public class OfficialPublication
 {
     public int Id { get; set; }
 
-    public int OfficialSourceId { get; set; }
+    public int TrustedSourceId { get; set; }
 
-    public OfficialSource? OfficialSource { get; set; }
+    public TrustedSource? TrustedSource { get; set; }
 
     [NotMapped]
-    public string SourceName => OfficialSource?.Name ?? string.Empty;
+    public string SourceName => TrustedSource?.Name ?? string.Empty;
 
     [MaxLength(500)]
     public string Title { get; set; } = string.Empty;
