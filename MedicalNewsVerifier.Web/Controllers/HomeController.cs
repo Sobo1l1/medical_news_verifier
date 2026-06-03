@@ -43,7 +43,7 @@ public class HomeController(ILogger<HomeController> logger, INewsAnalysisService
             return NotFound();
         }
 
-        var matches = await analysisService.GetOfficialMatchesAsync(record.NewsText, cancellationToken);
+        var matches = await analysisService.GetMatchesForAnalysisAsync(record.Id, cancellationToken);
         var vm = new AnalyzeResultViewModel
         {
             Input = new AnalyzeNewsInputModel

@@ -53,6 +53,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasForeignKey(p => p.TrustedSourceId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        modelBuilder.Entity<OfficialPublication>()
+            .HasIndex(p => p.Url)
+            .IsUnique();
+
         modelBuilder.Entity<TrustedSource>()
             .HasIndex(s => s.Name)
             .IsUnique();

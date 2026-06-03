@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using MedicalNewsVerifier.Web.Data;
 using MedicalNewsVerifier.Web.Models;
+using MedicalNewsVerifier.Web.Services.Parsers;
 using MedicalNewsVerifier.Web.ViewModels;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +12,7 @@ namespace MedicalNewsVerifier.Web.Services;
 public partial class NewsAnalysisService(
     AppDbContext db,
     IPythonLinguisticClient pythonClient,
-    IOfficialSourceFetcher officialSourceFetcher,
+    IRelevantCorpusService relevantCorpusService,
     IOllamaComparisonClient ollamaClient,
     IAnalysisJobStore jobStore,
     IWebHostEnvironment env,
@@ -25,8 +26,15 @@ public partial class NewsAnalysisService(
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
 
-    public async Task<List<OfficialPublicationMatchVm>> GetOfficialMatchesAsync(string newsText, CancellationToken cancellationToken) =>
-        await GetOfficialMatchesInternalAsync(newsText, cancellationToken);
+    public async Task<List<OfficialPublicationMatchVm>> GetOfficialMatchesAsync(
+        string newsText,
+        CancellationToken cancellationToken) =>
+        await GetOfficialMatchesInternalAsync(string.Empty, newsText, cancellationToken);
+
+    public Task<List<OfficialPublicationMatchVm>> GetMatchesForAnalysisAsync(
+        int analysisRecordId,
+        CancellationToken cancellationToken) =>
+        GetStoredMatchesAsync(analysisRecordId, cancellationToken);
 
     public async Task<(AnalysisRecord record, List<OfficialPublicationMatchVm> matches, bool isFromHistory)> AnalyzeAndSaveAsync(
         AnalyzeNewsInputModel input,
@@ -53,7 +61,7 @@ public partial class NewsAnalysisService(
             jobStore.Patch(jobId, s =>
             {
                 s.Phase = "LoadingSources";
-                s.Message = "Загрузка корпуса доверенных материалов и источников…";
+                s.Message = "Поиск релевантных материалов в официальных источниках…";
             });
 
             var forceNew = input.ForceNew;
@@ -79,7 +87,7 @@ public partial class NewsAnalysisService(
             }
 
             var maxCorpusSnippets = configuration.GetValue("Ollama:MaxCorpusSnippets", 4);
-            var publications = await LoadPublicationsCorpusAsync(cancellationToken);
+            var publications = await LoadPublicationsCorpusAsync(input.Headline, input.NewsText, cancellationToken);
             jobStore.Patch(jobId, s =>
             {
                 s.Phase = "RunningAnalyzers";
@@ -138,7 +146,7 @@ public partial class NewsAnalysisService(
             return (null, new List<OfficialPublicationMatchVm>());
         }
 
-        var historyMatches = await GetOfficialMatchesInternalAsync(input.NewsText, cancellationToken);
+        var historyMatches = await GetStoredMatchesAsync(existing.Id, cancellationToken);
         return (existing, historyMatches);
     }
 
@@ -153,11 +161,11 @@ public partial class NewsAnalysisService(
         var fullText = doc.FullText;
         var lexicons = LoadLexicons();
         var weights = LoadWeights();
-        var pubs = publications ?? await LoadPublicationsCorpusAsync(cancellationToken);
+        var pubs = publications ?? await LoadPublicationsCorpusAsync(input.Headline, input.NewsText, cancellationToken);
         var maxCorpus = maxCorpusSnippets ?? configuration.GetValue("Ollama:MaxCorpusSnippets", 4);
 
-        var matches = RankMatchesToViewModels(input.NewsText, pubs);
-        var corpusForLlm = SelectCorpusForLlm(input.NewsText, pubs, maxCorpus);
+        var matches = RankMatchesToViewModels(input.Headline, input.NewsText, pubs);
+        var corpusForLlm = SelectCorpusForLlm(input.Headline, input.NewsText, pubs, maxCorpus);
 
         if (jobId.HasValue)
         {
@@ -235,6 +243,10 @@ public partial class NewsAnalysisService(
 
         var combinedScore = CombineHeuristicAndLlm(heuristicScore.Value, llmOutcome);
         var submission = await GetOrCreateNewsSubmissionAsync(input, cancellationToken);
+
+        var usedPublications = SelectPublicationsUsedInVerification(pubs, matches, corpusForLlm);
+        var persisted = await relevantCorpusService.PersistUsedAsync(usedPublications, cancellationToken);
+        matches = ApplyPersistedIds(matches, persisted);
 
         var record = BuildAnalysisRecord(
             submission,
@@ -379,48 +391,96 @@ public partial class NewsAnalysisService(
         return string.IsNullOrWhiteSpace(llm.ErrorMessage) ? "Ollama: ошибка без сообщения." : $"Ollama: {llm.ErrorMessage}";
     }
 
-    private async Task<List<OfficialPublication>> LoadPublicationsCorpusAsync(CancellationToken cancellationToken)
+    private async Task<List<OfficialPublication>> LoadPublicationsCorpusAsync(
+        string headline,
+        string newsText,
+        CancellationToken cancellationToken)
     {
-        var fromDb = await db.OfficialPublications
-            .Include(p => p.TrustedSource)
-            .AsNoTracking()
-            .Where(p => p.TrustedSource!.IsEnabled)
-            .ToListAsync(cancellationToken);
-
-        if (fromDb.Count > 0)
-        {
-            logger.LogInformation(
-                "Corpus for analysis: {Count} publication(s) from database (manual corpus)",
-                fromDb.Count);
-            return fromDb;
-        }
-
-        List<OfficialPublication> fromWeb;
         try
         {
-            fromWeb = await officialSourceFetcher.FetchAsync(cancellationToken);
+            var relevant = await relevantCorpusService.FetchRelevantAsync(headline, newsText, cancellationToken);
+            if (relevant.Count > 0)
+            {
+                logger.LogInformation(
+                    "Corpus for analysis: {Count} relevant publication(s) from parsers and matching manual entries",
+                    relevant.Count);
+                return relevant;
+            }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            logger.LogWarning("Official source fetch canceled internally, corpus will be empty");
-            fromWeb = [];
+            logger.LogWarning("Relevant corpus fetch canceled internally");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to fetch relevant publications for analysis");
         }
 
-        if (fromWeb.Count > 0)
-        {
-            logger.LogInformation(
-                "Corpus for analysis: {Count} publication(s) fetched from OfficialSources:Urls (DB corpus is empty)",
-                fromWeb.Count);
-        }
-        else
-        {
-            logger.LogWarning("Corpus for analysis is empty: no DB publications and no web sources fetched");
-        }
-
-        return fromWeb;
+        logger.LogWarning("Corpus for analysis is empty: no relevant publications found for this news text");
+        return [];
     }
 
-    private static List<OfficialPublication> SelectCorpusForLlm(string newsText, List<OfficialPublication> pubs, int maxSnippets)
+    private static List<OfficialPublication> SelectPublicationsUsedInVerification(
+        List<OfficialPublication> corpus,
+        List<OfficialPublicationMatchVm> matches,
+        List<OfficialPublication> corpusForLlm)
+    {
+        var usedUrls = matches
+            .Select(m => HtmlTextExtractor.NormalizeUrl(m.Url))
+            .Concat(corpusForLlm.Select(p => HtmlTextExtractor.NormalizeUrl(p.Url)))
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return corpus
+            .Where(p => usedUrls.Contains(HtmlTextExtractor.NormalizeUrl(p.Url)))
+            .ToList();
+    }
+
+    private static List<OfficialPublicationMatchVm> ApplyPersistedIds(
+        List<OfficialPublicationMatchVm> matches,
+        List<OfficialPublication> persisted)
+    {
+        var byUrl = persisted.ToDictionary(
+            p => HtmlTextExtractor.NormalizeUrl(p.Url),
+            p => p,
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var match in matches)
+        {
+            if (byUrl.TryGetValue(HtmlTextExtractor.NormalizeUrl(match.Url), out var pub))
+            {
+                match.OfficialPublicationId = pub.Id;
+                match.SourceName = pub.TrustedSource?.Name ?? pub.SourceName;
+            }
+        }
+
+        return matches;
+    }
+
+    private async Task<List<OfficialPublicationMatchVm>> GetStoredMatchesAsync(
+        int analysisRecordId,
+        CancellationToken cancellationToken) =>
+        await db.OfficialPublicationMatches
+            .AsNoTracking()
+            .Include(m => m.OfficialPublication!)
+            .ThenInclude(p => p.TrustedSource)
+            .Where(m => m.AnalysisRecordId == analysisRecordId)
+            .OrderByDescending(m => m.RelevanceScore)
+            .Select(m => new OfficialPublicationMatchVm
+            {
+                OfficialPublicationId = m.OfficialPublicationId,
+                SourceName = m.OfficialPublication!.TrustedSource!.Name,
+                Title = m.OfficialPublication.Title,
+                Url = m.OfficialPublication.Url,
+                RelevanceScore = m.RelevanceScore
+            })
+            .ToListAsync(cancellationToken);
+
+    private static List<OfficialPublication> SelectCorpusForLlm(
+        string headline,
+        string newsText,
+        List<OfficialPublication> pubs,
+        int maxSnippets)
     {
         if (pubs.Count == 0)
         {
@@ -428,7 +488,7 @@ public partial class NewsAnalysisService(
         }
 
         var ordered = pubs
-            .Select(o => (o, Score: CalculateRelevance(newsText, o.Content)))
+            .Select(o => (o, Score: CalculateRelevance(headline, newsText, o.Content)))
             .OrderByDescending(x => x.Score)
             .ToList();
 
@@ -441,20 +501,26 @@ public partial class NewsAnalysisService(
         return ordered.Select(x => x.o).Take(maxSnippets).ToList();
     }
 
-    private static List<OfficialPublicationMatchVm> RankMatchesToViewModels(string newsText, List<OfficialPublication> pubs) =>
-        pubs
+    private static List<OfficialPublicationMatchVm> RankMatchesToViewModels(
+        string headline,
+        string newsText,
+        List<OfficialPublication> pubs)
+    {
+        var minScore = RelevanceScoring.QueryExpectsStatistics(headline, newsText) ? 22 : 18;
+        return pubs
             .Select(o => new OfficialPublicationMatchVm
             {
                 OfficialPublicationId = o.Id,
                 SourceName = o.SourceName,
                 Title = o.Title,
                 Url = o.Url,
-                RelevanceScore = CalculateRelevance(newsText, o.Content)
+                RelevanceScore = CalculateRelevance(headline, newsText, o.Content)
             })
-            .Where(m => m.RelevanceScore > 15)
+            .Where(m => m.RelevanceScore >= minScore)
             .OrderByDescending(m => m.RelevanceScore)
             .Take(5)
             .ToList();
+    }
 
     private static List<SuspiciousFragment> DeduplicateIdenticalSpans(List<SuspiciousFragment> fragments)
     {
@@ -538,30 +604,17 @@ public partial class NewsAnalysisService(
         _ => 20
     };
 
-    private async Task<List<OfficialPublicationMatchVm>> GetOfficialMatchesInternalAsync(string text, CancellationToken cancellationToken)
+    private async Task<List<OfficialPublicationMatchVm>> GetOfficialMatchesInternalAsync(
+        string headline,
+        string text,
+        CancellationToken cancellationToken)
     {
-        var pubs = await LoadPublicationsCorpusAsync(cancellationToken);
-        return RankMatchesToViewModels(text, pubs);
+        var pubs = await LoadPublicationsCorpusAsync(headline, text, cancellationToken);
+        return RankMatchesToViewModels(headline, text, pubs);
     }
 
-    private static int CalculateRelevance(string query, string officialContent)
-    {
-        var tokens = query
-            .ToLowerInvariant()
-            .Split([' ', ',', '.', ';', ':', '!', '?', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries)
-            .Where(t => t.Length > 3)
-            .Distinct()
-            .ToHashSet();
-
-        if (tokens.Count == 0)
-        {
-            return 0;
-        }
-
-        var content = officialContent.ToLowerInvariant();
-        var overlap = tokens.Count(content.Contains);
-        return (int)Math.Round((double)overlap / tokens.Count * 100);
-    }
+    private static int CalculateRelevance(string headline, string newsText, string officialContent) =>
+        RelevanceScoring.CalculateMatchScore(headline, newsText, officialContent);
 
     private static string BuildExplanation(
         int combinedScore,

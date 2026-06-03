@@ -1,5 +1,6 @@
 using MedicalNewsVerifier.Web.Data;
 using MedicalNewsVerifier.Web.Services;
+using MedicalNewsVerifier.Web.Services.Parsers;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -27,6 +28,27 @@ builder.Services.AddHttpClient<IOllamaComparisonClient, OllamaComparisonClient>(
     http.Timeout = TimeSpan.FromSeconds(Math.Max(30, opt.TimeoutSeconds));
 });
 builder.Services.AddScoped<IPythonLinguisticClient, PythonLinguisticClient>();
+
+static void ConfigureSourceParserHttpClient(HttpClient http, IConfiguration configuration)
+{
+    var timeoutSeconds = configuration.GetValue("SourceParsers:TimeoutSeconds", 30);
+    http.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+    http.DefaultRequestHeaders.UserAgent.ParseAdd("MedicalNewsVerifier/1.0 (corpus-sync)");
+}
+
+builder.Services.AddHttpClient<MinzdravNewsParser>((sp, http) =>
+    ConfigureSourceParserHttpClient(http, sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddHttpClient<RospotrebnadzorRecommendationsParser>((sp, http) =>
+    ConfigureSourceParserHttpClient(http, sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddHttpClient<ReferencedOfficialUrlFetcher>((sp, http) =>
+    ConfigureSourceParserHttpClient(http, sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddHttpClient<OfficialStatisticsEnricher>((sp, http) =>
+    ConfigureSourceParserHttpClient(http, sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddTransient<ISourceParser>(sp => sp.GetRequiredService<MinzdravNewsParser>());
+builder.Services.AddTransient<ISourceParser>(sp => sp.GetRequiredService<RospotrebnadzorRecommendationsParser>());
+builder.Services.AddScoped<SourceParserRegistry>();
+builder.Services.AddScoped<IRelevantCorpusService, RelevantCorpusService>();
+
 builder.Services.AddHttpClient<IOfficialSourceFetcher, OfficialSourceFetcher>();
 builder.Services.AddScoped<INewsAnalysisService, NewsAnalysisService>();
 
