@@ -33,6 +33,12 @@ public sealed class OllamaOptions
     /// Включить режим «thinking» у моделей вроде Qwen3. Для JSON-ответов рекомендуется false.
     /// </summary>
     public bool EnableThinking { get; set; }
+
+    /// <summary>Температура генерации (0 — детерминированнее, выше — разнообразнее). Диапазон 0–2.</summary>
+    public double Temperature { get; set; } = 0.1;
+
+    /// <summary>Nucleus sampling (top_p). Обычно 0.9–1.0 для фактчекинга.</summary>
+    public double TopP { get; set; } = 1.0;
 }
 
 public sealed partial class OllamaComparisonClient(
@@ -294,8 +300,8 @@ public sealed partial class OllamaComparisonClient(
         {
             Model = opt.Model.Trim(),
             Stream = false,
-            Temperature = 0.2,
-            TopP = 0.9,
+            Temperature = ClampSampling(opt.Temperature),
+            TopP = ClampTopP(opt.TopP),
             MaxTokens = opt.MaxResponseTokens,
             Think = opt.EnableThinking ? null : false,
             ResponseFormat = opt.ForceJsonResponseFormat ? new ResponseFormat { Type = "json_object" } : null,
@@ -377,8 +383,8 @@ public sealed partial class OllamaComparisonClient(
             ],
             Options = new NativeChatOptions
             {
-                Temperature = 0.0,
-                TopP = 1.0,
+                Temperature = ClampSampling(opt.Temperature),
+                TopP = ClampTopP(opt.TopP),
                 NumPredict = opt.MaxResponseTokens
             }
         };
@@ -624,6 +630,10 @@ public sealed partial class OllamaComparisonClient(
 
         return string.IsNullOrWhiteSpace(reasoning) ? string.Empty : reasoning.Trim();
     }
+
+    private static double ClampSampling(double temperature) => Math.Clamp(temperature, 0, 2);
+
+    private static double ClampTopP(double topP) => Math.Clamp(topP, 0.01, 1);
 
     private static bool IsCorpusWeakForFactCheck(IReadOnlyList<OfficialPublication> corpus) =>
         corpus.Count == 0;
