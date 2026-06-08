@@ -6,4 +6,5 @@ public sealed class SourceSearchQuery
     public required string NewsText { get; init; }
     public int MaxResults { get; init; } = 5;
     public int MinRelevanceScore { get; init; } = 10;
+    public int? MaxFeedScan { get; init; }
 }

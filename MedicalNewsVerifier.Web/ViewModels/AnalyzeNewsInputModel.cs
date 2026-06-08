@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using MedicalNewsVerifier.Web;
 
 namespace MedicalNewsVerifier.Web.ViewModels;
 
@@ -18,6 +19,8 @@ public class AnalyzeNewsInputModel : IValidatableObject
     public string? SourceUrl { get; set; }
 
     public bool ForceNew { get; set; }
+
+    public AnalysisRunSettings? RunSettings { get; set; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {

@@ -1,3 +1,4 @@
+using MedicalNewsVerifier.Web;
 using MedicalNewsVerifier.Web.Models;
 
 namespace MedicalNewsVerifier.Web.Services;
@@ -8,6 +9,7 @@ public interface IOllamaComparisonClient
         string headline,
         string newsBody,
         IReadOnlyList<OfficialPublication> corpusExcerpts,
+        EffectiveAnalysisRunSettings? runSettings,
         CancellationToken cancellationToken);
 }
 

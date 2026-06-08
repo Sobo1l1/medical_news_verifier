@@ -9,6 +9,7 @@ public interface IRelevantCorpusService
     Task<List<OfficialPublication>> FetchRelevantAsync(
         string headline,
         string newsText,
+        EffectiveAnalysisRunSettings? settings,
         CancellationToken cancellationToken);
 
     Task<List<OfficialPublication>> PersistUsedAsync(
@@ -27,10 +28,15 @@ public sealed class RelevantCorpusService(
     public async Task<List<OfficialPublication>> FetchRelevantAsync(
         string headline,
         string newsText,
+        EffectiveAnalysisRunSettings? settings,
         CancellationToken cancellationToken)
     {
-        var maxArticles = configuration.GetValue("SourceParsers:MaxArticlesPerAnalysis", 5);
-        var minRelevance = configuration.GetValue("SourceParsers:MinRelevanceScore", 15);
+        var maxArticles = settings?.MaxArticlesPerAnalysis
+            ?? configuration.GetValue("SourceParsers:MaxArticlesPerAnalysis", 5);
+        var minRelevance = settings?.MinRelevanceScore
+            ?? configuration.GetValue("SourceParsers:MinRelevanceScore", 15);
+        var maxFeedScan = settings?.MinzdravMaxFeedScan
+            ?? configuration.GetValue("SourceParsers:Minzdrav:MaxFeedScan", 400);
         var newsTopic = RelevanceScoring.DetectDominantTopic(headline, newsText);
         var expectsStats = RelevanceScoring.QueryExpectsStatistics(headline, newsText);
 
@@ -39,7 +45,8 @@ public sealed class RelevantCorpusService(
             Headline = headline,
             NewsText = newsText,
             MaxResults = maxArticles,
-            MinRelevanceScore = expectsStats ? Math.Max(minRelevance, 18) : minRelevance
+            MinRelevanceScore = expectsStats ? Math.Max(minRelevance, 18) : minRelevance,
+            MaxFeedScan = maxFeedScan
         };
 
         var corpusInDb = await db.OfficialPublications
@@ -122,7 +129,8 @@ public sealed class RelevantCorpusService(
                 Headline = query.Headline,
                 NewsText = query.NewsText,
                 MaxResults = maxArticles,
-                MinRelevanceScore = query.MinRelevanceScore
+                MinRelevanceScore = query.MinRelevanceScore,
+                MaxFeedScan = maxFeedScan
             };
 
             try
@@ -199,7 +207,8 @@ public sealed class RelevantCorpusService(
                 Headline = query.Headline,
                 NewsText = query.NewsText,
                 MaxResults = maxArticles + 5,
-                MinRelevanceScore = Math.Max(8, query.MinRelevanceScore - 7)
+                MinRelevanceScore = Math.Max(8, query.MinRelevanceScore - 7),
+                MaxFeedScan = maxFeedScan
             };
 
             foreach (var source in sources)

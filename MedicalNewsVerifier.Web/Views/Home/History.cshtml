@@ -4,44 +4,37 @@
     ViewData["Title"] = "История проверок";
 }
 
-<div class="container-fluid mt-4">
-    <h2 class="mb-4">История проверок достоверности новостей</h2>
+<div class="page-header mb-4">
+    <h1 class="page-title">История проверок</h1>
+    <p class="page-subtitle text-muted mb-0">Журнал всех выполненных анализов с фильтрами и экспортом</p>
+</div>
 
-    <!-- Статистика -->
-    <div class="row mb-4 g-3">
-        <div class="col-md-3">
-            <div class="card text-center border-primary">
-                <div class="card-body">
-                    <h6 class="card-title text-muted">Всего проверок</h6>
-                    <h3 class="text-primary">@Model.TotalCount</h3>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card text-center border-danger">
-                <div class="card-body">
-                    <h6 class="card-title text-muted">Подозрительные</h6>
-                    <h3 class="text-danger">@Model.SuspiciousCount</h3>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card text-center border-warning">
-                <div class="card-body">
-                    <h6 class="card-title text-muted">Требуют проверки</h6>
-                    <h3 class="text-warning">@Model.NeedsReviewCount</h3>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card text-center border-success">
-                <div class="card-body">
-                    <h6 class="card-title text-muted">Достоверные</h6>
-                    <h3 class="text-success">@Model.LikelyReliableCount</h3>
-                </div>
-            </div>
+<div class="row mb-4 g-3">
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="text-muted small">Всего проверок</div>
+            <div class="stat-value text-primary">@Model.TotalCount</div>
         </div>
     </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="text-muted small">Подозрительные</div>
+            <div class="stat-value text-danger">@Model.SuspiciousCount</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="text-muted small">Требуют проверки</div>
+            <div class="stat-value text-warning">@Model.NeedsReviewCount</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="text-muted small">Достоверные</div>
+            <div class="stat-value text-success">@Model.LikelyReliableCount</div>
+        </div>
+    </div>
+</div>
 
     @if (Model.TotalCount > 0)
     {
@@ -51,11 +44,9 @@
     }
 
     <!-- Фильтры -->
-    <div class="card mb-4 shadow-sm">
-        <div class="card-header bg-light">
-            <h5 class="mb-0">Фильтры поиска</h5>
-        </div>
-        <div class="card-body">
+    <div class="app-card mb-4">
+        <div class="app-card-header fw-semibold">Фильтры поиска</div>
+        <div class="app-card-body">
             <form method="get" class="row g-3" asp-action="History">
                 <div class="col-md-3">
                     <label class="form-label">Поиск по заголовку</label>
@@ -118,11 +109,15 @@
     <!-- Таблица результатов -->
     @if (Model.Records.Any())
     {
-        <div class="card shadow-sm">
-            <div class="card-header bg-light">
-                <h6 class="mb-0">Записи @Model.DisplayFrom–@Model.DisplayTo из @Model.TotalCount@if (Model.TotalPages > 1){<text> (страница @Model.PageNumber из @Model.TotalPages)</text>}</h6>
+        <div class="app-card">
+            <div class="app-card-header">
+                <span class="fw-semibold">Записи @Model.DisplayFrom–@Model.DisplayTo из @Model.TotalCount</span>
+                @if (Model.TotalPages > 1)
+                {
+                    <span class="text-muted small ms-1">(страница @Model.PageNumber из @Model.TotalPages)</span>
+                }
             </div>
-            <div class="card-body p-0">
+            <div class="p-0">
                 <div class="table-responsive">
                     <table class="table table-hover table-striped align-middle mb-0 history-table">
                         <thead class="table-light">
@@ -234,31 +229,5 @@
     }
     else
     {
-        <div class="alert alert-info">
-            Нет результатов, соответствующих выбранным фильтрам.
-        </div>
+        <div class="alert alert-info">Нет результатов, соответствующих выбранным фильтрам.</div>
     }
-</div>
-
-<style>
-    .card {
-        border: 1px solid rgba(0, 0, 0, 0.1);
-    }
-
-    .badge {
-        padding: 0.35em 0.65em;
-    }
-
-    table tbody tr:hover {
-        background-color: rgba(0, 123, 255, 0.05);
-    }
-
-    .history-table.table-striped > tbody > tr:nth-of-type(even) > * {
-        background-color: rgba(0, 0, 0, 0.03);
-    }
-
-    .btn-outline-primary:hover {
-        transform: scale(1.05);
-        transition: all 0.2s;
-    }
-</style>

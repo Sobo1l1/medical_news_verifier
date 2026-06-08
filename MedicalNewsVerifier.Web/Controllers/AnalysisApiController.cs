@@ -1,3 +1,4 @@
+using MedicalNewsVerifier.Web;
 using MedicalNewsVerifier.Web.Services;
 using MedicalNewsVerifier.Web.ViewModels;
 using Microsoft.AspNetCore.Mvc;
@@ -10,8 +11,16 @@ namespace MedicalNewsVerifier.Web.Controllers;
 public sealed class AnalysisApiController(
     IServiceScopeFactory scopeFactory,
     IAnalysisJobStore jobStore,
+    IAnalysisDefaultsService analysisDefaultsService,
     ILogger<AnalysisApiController> logger) : ControllerBase
 {
+    [HttpGet("defaults")]
+    public ActionResult<AnalysisDefaultsResponse> Defaults()
+    {
+        var effective = analysisDefaultsService.GetDefaults();
+        return Ok(AnalysisDefaultsResponse.FromEffective(effective));
+    }
+
     [HttpPost("start")]
     public IActionResult Start([FromBody] AnalyzeNewsInputModel? input)
     {
@@ -34,6 +43,14 @@ public sealed class AnalysisApiController(
         {
             input.SourceUrl = null;
         }
+
+        var settingsErrors = AnalysisRunSettingsValidator.Validate(input.RunSettings);
+        if (settingsErrors.Count > 0)
+        {
+            return BadRequest(new { message = string.Join(" ", settingsErrors) });
+        }
+
+        input.RunSettings = AnalysisRunSettingsValidator.Clamp(input.RunSettings);
 
         if (!TryValidateModel(input))
         {
@@ -71,4 +88,44 @@ public sealed class AnalysisApiController(
         var state = jobStore.TryGet(jobId);
         return state is null ? NotFound() : Ok(state);
     }
+}
+
+public sealed class AnalysisDefaultsResponse
+{
+    public bool OllamaEnabled { get; init; }
+    public bool OllamaGloballyEnabled { get; init; }
+    public int MaxCorpusSnippets { get; init; }
+    public int MaxCorpusCharsPerSnippet { get; init; }
+    public int MaxResponseTokens { get; init; }
+    public double Temperature { get; init; }
+    public double TopP { get; init; }
+    public bool EnableThinking { get; init; }
+    public int MaxArticlesPerAnalysis { get; init; }
+    public int MinRelevanceScore { get; init; }
+    public int MinzdravMaxFeedScan { get; init; }
+    public double HeuristicBlendWeight { get; init; }
+    public double LlmBlendWeight { get; init; }
+    public int PythonTimeoutSeconds { get; init; }
+    public bool PythonEnableNatasha { get; init; }
+    public bool PythonEnableStanza { get; init; }
+
+    public static AnalysisDefaultsResponse FromEffective(EffectiveAnalysisRunSettings s) => new()
+    {
+        OllamaEnabled = s.OllamaEnabled,
+        OllamaGloballyEnabled = s.OllamaGloballyEnabled,
+        MaxCorpusSnippets = s.MaxCorpusSnippets,
+        MaxCorpusCharsPerSnippet = s.MaxCorpusCharsPerSnippet,
+        MaxResponseTokens = s.MaxResponseTokens,
+        Temperature = s.Temperature,
+        TopP = s.TopP,
+        EnableThinking = s.EnableThinking,
+        MaxArticlesPerAnalysis = s.MaxArticlesPerAnalysis,
+        MinRelevanceScore = s.MinRelevanceScore,
+        MinzdravMaxFeedScan = s.MinzdravMaxFeedScan,
+        HeuristicBlendWeight = s.HeuristicBlendWeight,
+        LlmBlendWeight = s.LlmBlendWeight,
+        PythonTimeoutSeconds = s.PythonTimeoutSeconds,
+        PythonEnableNatasha = s.PythonEnableNatasha,
+        PythonEnableStanza = s.PythonEnableStanza
+    };
 }

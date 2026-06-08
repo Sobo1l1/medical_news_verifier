@@ -4,23 +4,15 @@
     var ollamaOn = Model.OllamaEnabled;
 }
 
-<div class="row">
-    <div class="col-lg-10">
-        <h2 class="mb-1">Первичная проверка достоверности медицинской новости</h2>
-        <p class="text-muted small mb-3">MedNews Verifier — проверка текстов медицинских новостей</p>
-        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <span class="badge @(ollamaOn ? "bg-success" : "bg-secondary")">
-                Нейросеть Ollama: @(ollamaOn ? "включена" : "выключена")
-            </span>
-            <a class="small" asp-controller="Home" asp-action="Diagnostics">Статус системы</a>
-        </div>
-        <div class="alert alert-secondary">
-            Анализ учитывает лексические, пунктуационные и структурные признаки (C#), дополнительный модуль Python,
-            совпадения с корпусом доверенных материалов и параллельно — сравнение с тем же корпусом через локальную модель
-                Нейросеть <strong>Ollama</strong>. Ход анализа отображается ниже по мере готовности этапов.
-        </div>
-        <div id="analysisProgressHost" class="card border-primary mb-3 shadow-sm d-none" aria-live="polite">
-            <div class="card-body py-3">
+<div class="page-header mb-4">
+    <h1 class="page-title">Проверка медицинской новости</h1>
+    <p class="page-subtitle text-muted mb-0">Признаковый анализ, корпус официальных источников и нейросеть Ollama</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-8">
+        <div id="analysisProgressHost" class="app-card app-card-accent mb-3 d-none" aria-live="polite">
+            <div class="app-card-body py-3">
                 <div class="d-flex align-items-center gap-2 mb-2">
                     <div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>
                     <strong id="analysisProgressTitle">Анализ выполняется…</strong>
@@ -32,57 +24,97 @@
                     <div class="analysis-step" data-step="3"><span class="step-dot"></span><span class="step-label">Сохранение</span></div>
                 </div>
                 <p class="small text-muted mb-2" id="analysisProgressMessage">Подготовка…</p>
-                <div class="row g-2 small">
+                <div class="row g-2">
                     <div class="col-md-4">
-                        <div class="border rounded p-2 bg-light">
-                            <div class="text-muted">@AnalysisUiLabels.FeatureAnalysisShort</div>
-                            <div id="analysisHeuristicScore" class="fs-5">—</div>
+                        <div class="score-pill">
+                            <div class="score-pill-label">@AnalysisUiLabels.FeatureAnalysisShort</div>
+                            <div id="analysisHeuristicScore" class="score-pill-value">—</div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="border rounded p-2 bg-light">
-                            <div class="text-muted">@AnalysisUiLabels.NeuralAnalysis</div>
-                            <div id="analysisLlmScore" class="fs-5">—</div>
+                        <div class="score-pill">
+                            <div class="score-pill-label">@AnalysisUiLabels.NeuralAnalysisShort</div>
+                            <div id="analysisLlmScore" class="score-pill-value">—</div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="border rounded p-2 bg-light">
-                            <div class="text-muted">Итог</div>
-                            <div id="analysisCombinedScore" class="fs-5">—</div>
+                        <div class="score-pill">
+                            <div class="score-pill-label">Итог</div>
+                            <div id="analysisCombinedScore" class="score-pill-value">—</div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
+
         @if (Model.LastAnalysis is not null)
         {
             <partial name="_AnalyzeFollowUpActions" model="false" />
         }
-        <form id="newsAnalyzeForm" asp-action="Analyze" method="post" class="card card-body shadow-sm">
-            <div class="mb-3">
-                <label asp-for="Input.Headline" class="form-label"></label>
-                <input asp-for="Input.Headline" class="form-control" />
-                <span asp-validation-for="Input.Headline" class="text-danger"></span>
-            </div>
-            <div class="mb-3">
-                <label asp-for="Input.NewsText" class="form-label"></label>
-                <textarea asp-for="Input.NewsText" class="form-control" rows="8" maxlength="15000"></textarea>
-                <span asp-validation-for="Input.NewsText" class="text-danger"></span>
-            </div>
-            <div class="mb-3">
-                <label asp-for="Input.SourceUrl" class="form-label"></label>
-                <input asp-for="Input.SourceUrl" class="form-control" />
-                <span asp-validation-for="Input.SourceUrl" class="text-danger"></span>
-            </div>
-            @if (Model.LastAnalysis is null)
-            {
+
+        <div class="app-card">
+            <div class="app-card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <span class="fw-semibold">Текст для проверки</span>
                 <div class="d-flex flex-wrap gap-2 align-items-center">
-                    <button type="submit" id="newsAnalyzeSubmit" class="btn btn-primary js-analysis-lockable" name="forceNew" value="false">Запустить анализ</button>
+                    <span id="settingsModifiedBadge" class="badge bg-warning text-dark d-none">Настройки изменены</span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="offcanvas" data-bs-target="#analysisSettingsOffcanvas">
+                        <i class="bi bi-sliders"></i> Настройки
+                    </button>
                 </div>
-            }
-        </form>
+            </div>
+            <form id="newsAnalyzeForm" asp-action="Analyze" method="post" class="app-card-body">
+                <div class="mb-3">
+                    <label asp-for="Input.Headline" class="form-label"></label>
+                    <input asp-for="Input.Headline" class="form-control" />
+                    <span asp-validation-for="Input.Headline" class="text-danger"></span>
+                </div>
+                <div class="mb-3">
+                    <label asp-for="Input.NewsText" class="form-label"></label>
+                    <textarea asp-for="Input.NewsText" class="form-control" rows="10" maxlength="15000"></textarea>
+                    <span asp-validation-for="Input.NewsText" class="text-danger"></span>
+                </div>
+                <div class="mb-3">
+                    <label asp-for="Input.SourceUrl" class="form-label"></label>
+                    <input asp-for="Input.SourceUrl" class="form-control" />
+                    <span asp-validation-for="Input.SourceUrl" class="text-danger"></span>
+                </div>
+                @if (Model.LastAnalysis is null)
+                {
+                    <button type="submit" id="newsAnalyzeSubmit" class="btn btn-primary js-analysis-lockable" name="forceNew" value="false">
+                        <i class="bi bi-play-fill me-1"></i> Запустить анализ
+                    </button>
+                }
+            </form>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="app-card mb-3">
+            <div class="app-card-body">
+                <h6 class="fw-semibold mb-2"><i class="bi bi-info-circle me-1"></i> Как работает проверка</h6>
+                <ol class="small text-muted ps-3 mb-0">
+                    <li class="mb-1">Поиск релевантных материалов в официальных источниках</li>
+                    <li class="mb-1">@AnalysisUiLabels.FeatureAnalysis (C# + Python)</li>
+                    <li class="mb-1">@AnalysisUiLabels.NeuralAnalysis — сравнение с корпусом</li>
+                    <li>Итоговая оценка и разметка текста</li>
+                </ol>
+            </div>
+        </div>
+        <div class="app-card">
+            <div class="app-card-body">
+                <h6 class="fw-semibold mb-2">Статус компонентов</h6>
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                    <span class="badge @(ollamaOn ? "bg-success" : "bg-secondary")">
+                        Нейросеть Ollama: @(ollamaOn ? "вкл" : "выкл")
+                    </span>
+                </div>
+                <a class="small" asp-controller="Home" asp-action="Diagnostics">Подробная диагностика →</a>
+            </div>
+        </div>
     </div>
 </div>
+
+<partial name="_AnalysisSettingsPanel" model="ollamaOn" />
 
 @if (Model.LastAnalysis is not null)
 {
@@ -91,172 +123,125 @@
         .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
         .ToList();
 
-    <div class="row mt-4">
-        <div class="col-lg-10">
+    <div class="row mt-4 g-4">
+        <div class="col-12">
             @if (Model.OpenedFromHistory)
             {
-                <div class="alert alert-info py-2">
-                    Просмотр сохранённой проверки из истории: оценка, разметка и расшифровка признаков восстановлены из базы данных.
-                </div>
+                <div class="alert alert-info py-2">Просмотр сохранённой проверки из истории.</div>
             }
             else if (Model.IsFromHistory)
             {
-                <div class="alert alert-info py-2">
-                    Совпадающая проверка уже выполнялась ранее. Показан сохранённый результат и разметка из истории.
-                </div>
+                <div class="alert alert-info py-2">Совпадающая проверка уже выполнялась — показан сохранённый результат.</div>
             }
 
             <partial name="_AnalysisVerdictCard" model="Model" />
 
             <div class="d-flex flex-wrap gap-2 mb-3">
-                <a class="btn btn-sm btn-outline-danger" asp-action="ExportPdf" asp-route-id="@Model.LastAnalysis.Id">Скачать PDF</a>
-                <a class="btn btn-sm btn-outline-secondary" asp-action="ExportJson" asp-route-id="@Model.LastAnalysis.Id">Скачать JSON</a>
+                <a class="btn btn-sm btn-outline-danger" asp-action="ExportPdf" asp-route-id="@Model.LastAnalysis.Id"><i class="bi bi-file-pdf me-1"></i>PDF</a>
+                <a class="btn btn-sm btn-outline-secondary" asp-action="ExportJson" asp-route-id="@Model.LastAnalysis.Id"><i class="bi bi-filetype-json me-1"></i>JSON</a>
             </div>
 
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h4 class="mb-3">Подробный результат</h4>
-                    <div class="mb-0">
-                        <div class="fw-semibold mb-2">Сводка автоматического анализа</div>
-                        @{
-                            var llmHasSummary = !string.IsNullOrWhiteSpace(Model.LastAnalysis.LlmSummary);
-                            var llmHasResult = Model.LastAnalysis.LlmAlignmentScore.HasValue;
-                            var llmSummaryBlockClass = llmHasResult
-                                ? "ollama-summary-block"
-                                : "ollama-summary-block ollama-summary-block--warning";
-                        }
-                        @if (llmHasSummary)
-                        {
-                            <div class="@llmSummaryBlockClass small mb-3">
-                                <div class="fw-semibold mb-1">Краткое резюме (@AnalysisUiLabels.NeuralAnalysis)</div>
-                                <div class="text-break mb-0">@Model.LastAnalysis.LlmSummary</div>
-                            </div>
-                        }
-                        @if (explanationLines.Count == 0)
-                        {
-                            <p class="text-muted small mb-0">Пояснение отсутствует.</p>
-                        }
-                        else
-                        {
-                            <ul class="list-unstyled analysis-summary border rounded-3 overflow-hidden mb-0">
-                                @foreach (var line in explanationLines)
-                                {
-                                    <li class="d-flex gap-3 px-3 py-2 border-bottom border-light small">
-                                        <span class="text-secondary flex-shrink-0">—</span>
-                                        <span class="text-break">@line</span>
-                                    </li>
-                                }
-                            </ul>
-                        }
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="row mt-3">
-        <div class="col-lg-10">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="mb-2">Разметка текста</h5>
-                    <p class="small text-muted mb-2">
-                        Заголовок выделен жирным; ниже — текст новости. Наведите указатель на блок признака справа —
-                        подсветятся и текст, и сам блок.
-                    </p>
-                    <div class="markup-legend small mb-3 d-flex flex-wrap gap-3 align-items-center">
-                        <span class="text-muted me-1">Легенда:</span>
-                        @foreach (var sw in FeatureKindMetadata.LegendSwatches())
-                        {
-                            <span class="d-inline-flex align-items-center gap-1">
-                                <span class="markup-legend-swatch marker-kind-@sw.CssToken" title="@sw.Label"></span>
-                                <span>@sw.Label</span>
-                            </span>
-                        }
-                    </div>
-                    <div class="row g-3" data-analysis-markup>
-                        <div class="col-lg-7">
-                            <div class="text-markup-host" aria-label="Текст с подсветкой признаков">
-                                @Html.Raw(Model.HighlightedHtml ?? string.Empty)
-                            </div>
-                        </div>
-                        <div class="col-lg-5">
-                            @if (featureGroups.Count == 0)
-                            {
-                                <p class="text-muted mb-0">Записей разметки с типом признака нет (возможна старая запись до обновления схемы).</p>
-                            }
-                            else
-                            {
-                                @foreach (var g in featureGroups)
-                                {
-                                    var kinds = string.Join(",", g.KindValues);
-                                    var samples = g.Fragments
-                                        .Select(f => f.FragmentText)
-                                        .Where(t => !string.IsNullOrWhiteSpace(t))
-                                        .Distinct()
-                                        .Take(4)
-                                        .ToList();
-                                    <div class="feature-hint border rounded p-2 mb-2" data-feature-hints="@kinds">
-                                        <div class="fw-semibold">@g.Title</div>
-                                        <div class="small text-muted mt-1">@g.Description</div>
-                                        <div class="small mt-2">
-                                            <span class="text-muted">Найдено вхождений:</span> <strong>@g.Fragments.Count</strong>
-                                        </div>
-                                        @if (samples.Count > 0)
-                                        {
-                                            <div class="small mt-1 text-break">
-                                                <span class="text-muted">Примеры:</span>
-                                                @string.Join(" · ", samples.Select(s => s.Length > 80 ? s[..77] + "…" : s))
-                                            </div>
-                                        }
-                                    </div>
-                                }
-                            }
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="row mt-3">
-        <div class="col-lg-10">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5>Релевантные официальные публикации</h5>
-                    @if (Model.OfficialMatches.Count == 0)
+            <div class="app-card mb-3">
+                <div class="app-card-header fw-semibold">Подробный результат</div>
+                <div class="app-card-body">
+                    @{
+                        var llmHasSummary = !string.IsNullOrWhiteSpace(Model.LastAnalysis.LlmSummary);
+                        var llmHasResult = Model.LastAnalysis.LlmAlignmentScore.HasValue;
+                        var llmSummaryBlockClass = llmHasResult ? "ollama-summary-block" : "ollama-summary-block ollama-summary-block--warning";
+                    }
+                    @if (llmHasSummary)
                     {
-                        <div class="alert alert-light border small mb-0">
-                            <p class="mb-2">Совпадения с официальными источниками не найдены. Чтобы улучшить проверку:</p>
-                            <ul class="mb-0">
-                                <li>Укажите полные URL официальных источников в тексте новости (с префиксом <code>https://</code>).</li>
-                                <li>Добавьте ключевые слова темы (онкология, ОРВИ, статистика и т.д.).</li>
-                                <li>Проверьте, что в разделе «Корпус» есть материалы по вашей теме.</li>
-                            </ul>
+                        <div class="@llmSummaryBlockClass small mb-3">
+                            <div class="fw-semibold mb-1">Краткое резюме (@AnalysisUiLabels.NeuralAnalysis)</div>
+                            <div class="text-break mb-0">@Model.LastAnalysis.LlmSummary</div>
                         </div>
+                    }
+                    @if (explanationLines.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Пояснение отсутствует.</p>
                     }
                     else
                     {
-                        <ul class="list-group">
-                            @foreach (var source in Model.OfficialMatches)
+                        <ul class="list-unstyled analysis-summary mb-0">
+                            @foreach (var line in explanationLines)
                             {
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <div><strong>@source.SourceName</strong>: @source.Title</div>
-                                        <a href="@source.Url" target="_blank" rel="noopener">@source.Url</a>
-                                    </div>
-                                    <span class="badge bg-@source.RelevanceBadgeClass"
-                                          title="Совпадение по ключевым словам и теме новости">@source.RelevanceLabel (@source.RelevanceScore%)</span>
+                                <li class="d-flex gap-3 px-3 py-2 border-bottom border-light small">
+                                    <span class="text-secondary flex-shrink-0">—</span>
+                                    <span class="text-break">@line</span>
                                 </li>
                             }
                         </ul>
                     }
                 </div>
             </div>
-        </div>
-    </div>
 
-    <div class="row mt-3">
-        <div class="col-lg-10">
+            <div class="app-card mb-3">
+                <div class="app-card-header fw-semibold">Разметка текста</div>
+                <div class="app-card-body">
+                    <p class="small text-muted mb-2">Наведите на блок признака справа — подсветятся фрагменты в тексте.</p>
+                    <div class="markup-legend small mb-3 d-flex flex-wrap gap-3 align-items-center">
+                        <span class="text-muted me-1">Легенда:</span>
+                        @foreach (var sw in FeatureKindMetadata.LegendSwatches())
+                        {
+                            <span class="d-inline-flex align-items-center gap-1">
+                                <span class="markup-legend-swatch marker-kind-@sw.CssToken"></span>
+                                <span>@sw.Label</span>
+                            </span>
+                        }
+                    </div>
+                    <div class="row g-3" data-analysis-markup>
+                        <div class="col-lg-7">
+                            <div class="text-markup-host">@Html.Raw(Model.HighlightedHtml ?? string.Empty)</div>
+                        </div>
+                        <div class="col-lg-5">
+                            @if (featureGroups.Count == 0)
+                            {
+                                <p class="text-muted mb-0">Записей разметки нет.</p>
+                            }
+                            else
+                            {
+                                @foreach (var g in featureGroups)
+                                {
+                                    var kinds = string.Join(",", g.KindValues);
+                                    <div class="feature-hint border rounded p-2 mb-2" data-feature-hints="@kinds">
+                                        <div class="fw-semibold">@g.Title</div>
+                                        <div class="small text-muted mt-1">@g.Description</div>
+                                        <div class="small mt-2">Найдено: <strong>@g.Fragments.Count</strong></div>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="app-card mb-3">
+                <div class="app-card-header fw-semibold">Релевантные официальные публикации</div>
+                <div class="app-card-body">
+                    @if (Model.OfficialMatches.Count == 0)
+                    {
+                        <div class="alert alert-light border small mb-0">
+                            <p class="mb-2">Совпадения не найдены. Добавьте URL источников (<code>https://</code>) в текст новости.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush">
+                            @foreach (var source in Model.OfficialMatches)
+                            {
+                                <li class="list-group-item px-0 d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <div><strong>@source.SourceName</strong>: @source.Title</div>
+                                        <a href="@source.Url" target="_blank" rel="noopener" class="small">@source.Url</a>
+                                    </div>
+                                    <span class="badge bg-@source.RelevanceBadgeClass">@source.RelevanceLabel (@source.RelevanceScore%)</span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+
             <partial name="_AnalyzeFollowUpActions" model="true" />
         </div>
     </div>
@@ -270,243 +255,21 @@
     }
     @{
         var analysisStartUrl = Url.Action("Start", "AnalysisApi") ?? "";
+        var analysisDefaultsUrl = Url.Action("Defaults", "AnalysisApi") ?? "";
         var statusJobPlaceholder = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var analysisStatusUrlTemplate = Url.Action("Status", "AnalysisApi", new { jobId = statusJobPlaceholder }) ?? "";
         const int detailsIdPlaceholder = 123456789;
         var detailsUrlTemplate = Url.Action("Details", "Home", new { id = detailsIdPlaceholder }) ?? "";
-        var jso = new System.Text.Json.JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-        var analysisStartJson = System.Text.Json.JsonSerializer.Serialize(analysisStartUrl, jso);
-        var analysisStatusJson = System.Text.Json.JsonSerializer.Serialize(analysisStatusUrlTemplate, jso);
-        var detailsUrlJson = System.Text.Json.JsonSerializer.Serialize(detailsUrlTemplate, jso);
-        var statusPlaceholderJson = System.Text.Json.JsonSerializer.Serialize(statusJobPlaceholder.ToString("D"), jso);
-        var detailsPlaceholderJson = System.Text.Json.JsonSerializer.Serialize(detailsIdPlaceholder.ToString(System.Globalization.CultureInfo.InvariantCulture), jso);
     }
     <script>
-        (function () {
-            const analysisStartUrl = @Html.Raw(analysisStartJson);
-            const analysisStatusUrlTemplate = @Html.Raw(analysisStatusJson);
-            const detailsUrlTemplate = @Html.Raw(detailsUrlJson);
-            const statusJobPlaceholder = @Html.Raw(statusPlaceholderJson);
-            const detailsIdPlaceholder = @Html.Raw(detailsPlaceholderJson);
-            const form = document.getElementById('newsAnalyzeForm');
-            const host = document.getElementById('analysisProgressHost');
-            const msg = document.getElementById('analysisProgressMessage');
-            const hScore = document.getElementById('analysisHeuristicScore');
-            const lScore = document.getElementById('analysisLlmScore');
-            const cScore = document.getElementById('analysisCombinedScore');
-            const lockableButtons = Array.from(document.querySelectorAll('.js-analysis-lockable'));
-            const lockableNav = Array.from(document.querySelectorAll('.js-analysis-lockable-nav, .navbar a, a.nav-link'));
-            let analysisRunning = false;
-            if (!form || !host || !analysisStartUrl) return;
-            const formControls = Array.from(form.querySelectorAll('input, textarea, select, button'));
-
-            function statusUrl(jobId) {
-                return analysisStatusUrlTemplate.replace(statusJobPlaceholder, jobId);
-            }
-            function detailsUrl(id) {
-                return detailsUrlTemplate.replace(detailsIdPlaceholder, String(id));
-            }
-
-            function setUiLocked(isLocked) {
-                lockableButtons.forEach((btn) => {
-                    btn.disabled = isLocked;
-                    btn.setAttribute('aria-disabled', isLocked ? 'true' : 'false');
-                });
-                formControls.forEach((control) => {
-                    if (isLocked) {
-                        control.setAttribute('data-analysis-was-disabled', control.disabled ? '1' : '0');
-                        control.disabled = true;
-                    } else {
-                        const wasDisabled = control.getAttribute('data-analysis-was-disabled') === '1';
-                        control.disabled = wasDisabled;
-                        control.removeAttribute('data-analysis-was-disabled');
-                    }
-                });
-                lockableNav.forEach((link) => {
-                    link.style.pointerEvents = isLocked ? 'none' : '';
-                    link.style.opacity = isLocked ? '0.55' : '';
-                    link.setAttribute('aria-disabled', isLocked ? 'true' : 'false');
-                    if (isLocked) {
-                        link.setAttribute('tabindex', '-1');
-                    } else {
-                        link.removeAttribute('tabindex');
-                    }
-                });
-            }
-
-            function updateStepper(state) {
-                const phase = state?.phase ?? '';
-                const featuresDone = !!state?.featuresCompleted
-                    || phase === 'Combining' || phase === 'Completed';
-                const neuralDone = !!state?.neuralCompleted
-                    || phase === 'Combining' || phase === 'Completed';
-                const sourcesDone = phase !== 'LoadingSources' && phase !== 'Started' && phase !== 'Pending' && phase !== '';
-
-                let activeStep = 0;
-                if (sourcesDone) {
-                    activeStep = featuresDone ? (neuralDone ? 3 : 2) : 1;
-                }
-                if (phase === 'Combining') {
-                    activeStep = 3;
-                }
-                if (phase === 'Completed') {
-                    activeStep = 4;
-                }
-
-                const steps = document.querySelectorAll('#analysisStepper .analysis-step');
-                steps.forEach((el) => {
-                    const idx = parseInt(el.getAttribute('data-step') || '0', 10);
-                    const done = idx === 0 ? sourcesDone
-                        : idx === 1 ? featuresDone
-                        : idx === 2 ? neuralDone
-                        : phase === 'Combining' || phase === 'Completed';
-                    el.classList.toggle('is-active', idx === activeStep && phase !== 'Completed');
-                    el.classList.toggle('is-done', done && idx !== activeStep);
-                });
-            }
-
-            function updateProgressUi(state) {
-                const phase = state?.phase ?? '';
-                updateStepper(state);
-
-                const hasHeuristic = typeof state?.heuristicScore === 'number';
-                const hasLlm = typeof state?.llmScore === 'number';
-                const hasCombined = typeof state?.combinedScore === 'number';
-
-                hScore.textContent = hasHeuristic
-                    ? state.heuristicScore + '/100'
-                    : 'Выполняется…';
-                lScore.textContent = hasLlm
-                    ? state.llmScore + '/100'
-                    : hasHeuristic
-                        ? 'Нейросетевой этап в работе…'
-                        : 'Ожидание…';
-                cScore.textContent = hasCombined
-                    ? state.combinedScore + '/100'
-                    : hasHeuristic
-                        ? 'Формируется итог…'
-                        : 'Ожидание…';
-
-                if (phase === 'HeuristicReady') {
-                    msg.textContent = state?.message || 'Признаковый анализ завершён. Выполняется нейросетевой анализ…';
-                } else if (phase === 'LlmReady') {
-                    msg.textContent = state?.message || 'Нейросетевой анализ завершён. Формируется итоговый вывод…';
-                } else if (state?.message) {
-                    msg.textContent = state.message;
-                }
-            }
-
-            form.addEventListener('submit', async function (e) {
-                const submitter = e.submitter;
-                e.preventDefault();
-                if (analysisRunning) {
-                    msg.classList.remove('text-danger');
-                    msg.textContent = 'Проверка уже выполняется. Дождитесь завершения текущего запуска.';
-                    return;
-                }
-                if (!form.checkValidity()) {
-                    form.reportValidity();
-                    return;
-                }
-                analysisRunning = true;
-                setUiLocked(true);
-
-                host.classList.remove('d-none');
-                updateStepper({ phase: 'LoadingSources' });
-                msg.textContent = 'Отправка запроса…';
-                msg.classList.remove('text-danger');
-                hScore.textContent = 'Ожидание…';
-                lScore.textContent = 'Ожидание…';
-                cScore.textContent = 'Ожидание…';
-
-                const payload = {
-                    headline: document.querySelector('[name="Input.Headline"]')?.value ?? '',
-                    newsText: document.querySelector('[name="Input.NewsText"]')?.value ?? '',
-                    forceNew: submitter && submitter.getAttribute('name') === 'forceNew' && submitter.value === 'true',
-                    sourceUrl: (() => {
-                        const v = document.querySelector('[name="Input.SourceUrl"]')?.value?.trim() ?? '';
-                        return v === '' ? null : v;
-                    })()
-                };
-
-                const startResp = await fetch(analysisStartUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!startResp.ok) {
-                    let detail = 'HTTP ' + startResp.status;
-                    try {
-                        const errBody = await startResp.json();
-                        if (errBody.errors && typeof errBody.errors === 'object') {
-                            const lines = [];
-                            for (const key of Object.keys(errBody.errors)) {
-                                const arr = errBody.errors[key];
-                                if (Array.isArray(arr)) {
-                                    for (const line of arr) {
-                                        lines.push(line);
-                                    }
-                                }
-                            }
-                            if (lines.length) {
-                                detail = lines.join(' ');
-                            }
-                        } else if (typeof errBody.message === 'string' && errBody.message) {
-                            detail = errBody.message;
-                        } else if (typeof errBody.title === 'string' && errBody.title) {
-                            detail = errBody.title;
-                        }
-                    } catch {
-                        /* ignore */
-                    }
-                    msg.classList.add('text-danger');
-                    msg.textContent = 'Не удалось запустить анализ: ' + detail;
-                    analysisRunning = false;
-                    setUiLocked(false);
-                    return;
-                }
-
-                const startJson = await startResp.json();
-                const jobId = startJson.jobId;
-                if (!jobId) {
-                    msg.classList.add('text-danger');
-                    msg.textContent = 'Сервер не вернул идентификатор задания.';
-                    analysisRunning = false;
-                    setUiLocked(false);
-                    return;
-                }
-                msg.textContent = 'Анализ запущен, ожидайте этапы…';
-
-                const timer = setInterval(async () => {
-                    const st = await fetch(statusUrl(jobId), { headers: { 'Accept': 'application/json' } });
-                    if (!st.ok) {
-                        clearInterval(timer);
-                        msg.textContent = 'Статус анализа недоступен (HTTP ' + st.status + ').';
-                        analysisRunning = false;
-                        setUiLocked(false);
-                        return;
-                    }
-                    const s = await st.json();
-                    updateProgressUi(s);
-
-                    if (s.phase === 'Completed') {
-                        clearInterval(timer);
-                        analysisRunning = false;
-                        if (s.recordId) {
-                            window.location.href = detailsUrl(s.recordId);
-                        } else {
-                            setUiLocked(false);
-                        }
-                    }
-                    if (s.phase === 'Failed') {
-                        clearInterval(timer);
-                        msg.textContent = 'Ошибка: ' + (s.error || 'неизвестно');
-                        analysisRunning = false;
-                        setUiLocked(false);
-                    }
-                }, 450);
-            });
-        })();
+        window.__analysisPageConfig = {
+            startUrl: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(analysisStartUrl)),
+            defaultsUrl: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(analysisDefaultsUrl)),
+            statusUrlTemplate: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(analysisStatusUrlTemplate)),
+            detailsUrlTemplate: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(detailsUrlTemplate)),
+            statusJobPlaceholder: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(statusJobPlaceholder.ToString("D"))),
+            detailsIdPlaceholder: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(detailsIdPlaceholder.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+        };
     </script>
+    <script src="~/js/analysis-page.js" asp-append-version="true"></script>
 }

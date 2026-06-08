@@ -3,83 +3,86 @@
     ViewData["Title"] = "Статус системы";
 }
 
-<div class="container-fluid mt-4">
-    <h2 class="mb-4">Диагностика компонентов</h2>
+<div class="page-header mb-4">
+    <h1 class="page-title">Диагностика компонентов</h1>
+    <p class="page-subtitle text-muted mb-0">Состояние БД, нейросети Ollama и Python-модуля</p>
+</div>
 
-    <div class="row g-3">
-        <div class="col-md-4">
-            <div class="card h-100 border-@(Model.DatabaseOk ? "success" : "danger")">
-                <div class="card-body">
-                    <h5 class="card-title">PostgreSQL</h5>
-                    <p class="mb-0">
-                        @if (Model.DatabaseOk)
-                        {
-                            <span class="badge bg-success">Подключена</span>
-                        }
-                        else
-                        {
-                            <span class="badge bg-danger">Ошибка</span>
-                            <span class="small text-muted d-block mt-2">@Model.DatabaseError</span>
-                        }
-                    </p>
-                </div>
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="stat-card h-100 text-start border-@(Model.DatabaseOk ? "success" : "danger")">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <i class="bi bi-database fs-4"></i>
+                <span class="fw-semibold">PostgreSQL</span>
             </div>
-        </div>
-
-        <div class="col-md-4">
-            <div class="card h-100 border-@(!Model.OllamaEnabled ? "secondary" : Model.OllamaReachable ? "success" : "warning")">
-                <div class="card-body">
-                    <h5 class="card-title">Ollama</h5>
-                    @if (!Model.OllamaEnabled)
-                    {
-                        <span class="badge bg-secondary">Выключена в конфигурации</span>
-                    }
-                    else if (Model.OllamaReachable)
-                    {
-                        <span class="badge bg-success">Доступна</span>
-                        @if (!string.IsNullOrWhiteSpace(Model.OllamaModel))
-                        {
-                            <div class="small text-muted mt-2">Модель: @Model.OllamaModel</div>
-                        }
-                    }
-                    else
-                    {
-                        <span class="badge bg-warning text-dark">Недоступна</span>
-                        @if (!string.IsNullOrWhiteSpace(Model.OllamaError))
-                        {
-                            <div class="small text-muted mt-2">@Model.OllamaError</div>
-                        }
-                    }
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-4">
-            <div class="card h-100 border-@(Model.PythonAvailable ? "success" : "warning")">
-                <div class="card-body">
-                    <h5 class="card-title">Python</h5>
-                    @if (Model.PythonAvailable)
-                    {
-                        <span class="badge bg-success">Доступен</span>
-                        @if (!string.IsNullOrWhiteSpace(Model.PythonVersion))
-                        {
-                            <div class="small text-muted mt-2">@Model.PythonVersion</div>
-                        }
-                    }
-                    else
-                    {
-                        <span class="badge bg-warning text-dark">Недоступен</span>
-                        @if (!string.IsNullOrWhiteSpace(Model.PythonError))
-                        {
-                            <div class="small text-muted mt-2">@Model.PythonError</div>
-                        }
-                    }
-                </div>
-            </div>
+            @if (Model.DatabaseOk)
+            {
+                <span class="badge bg-success">Подключена</span>
+            }
+            else
+            {
+                <span class="badge bg-danger">Ошибка</span>
+                @if (!string.IsNullOrWhiteSpace(Model.DatabaseError))
+                {
+                    <div class="small text-muted mt-2">@Model.DatabaseError</div>
+                }
+            }
         </div>
     </div>
 
-    <div class="mt-4">
-        <a asp-action="Index" class="btn btn-outline-secondary">← К проверке новости</a>
+    <div class="col-md-4">
+        <div class="stat-card h-100 text-start border-@(!Model.OllamaEnabled ? "secondary" : Model.OllamaReachable ? "success" : "warning")">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <i class="bi bi-cpu fs-4"></i>
+                <span class="fw-semibold">Нейросеть Ollama</span>
+            </div>
+            @if (!Model.OllamaEnabled)
+            {
+                <span class="badge bg-secondary">Выключена в конфигурации</span>
+            }
+            else if (Model.OllamaReachable)
+            {
+                <span class="badge bg-success">Доступна</span>
+                @if (!string.IsNullOrWhiteSpace(Model.OllamaModel))
+                {
+                    <div class="small text-muted mt-2">Модель: @Model.OllamaModel</div>
+                }
+            }
+            else
+            {
+                <span class="badge bg-warning text-dark">Недоступна</span>
+                @if (!string.IsNullOrWhiteSpace(Model.OllamaError))
+                {
+                    <div class="small text-muted mt-2">@Model.OllamaError</div>
+                }
+            }
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="stat-card h-100 text-start border-@(Model.PythonAvailable ? "success" : "warning")">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <i class="bi bi-filetype-py fs-4"></i>
+                <span class="fw-semibold">Python</span>
+            </div>
+            @if (Model.PythonAvailable)
+            {
+                <span class="badge bg-success">Доступен</span>
+                @if (!string.IsNullOrWhiteSpace(Model.PythonVersion))
+                {
+                    <div class="small text-muted mt-2">@Model.PythonVersion</div>
+                }
+            }
+            else
+            {
+                <span class="badge bg-warning text-dark">Недоступен</span>
+                @if (!string.IsNullOrWhiteSpace(Model.PythonError))
+                {
+                    <div class="small text-muted mt-2">@Model.PythonError</div>
+                }
+            }
+        </div>
     </div>
 </div>
+
+<a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>К проверке новости</a>

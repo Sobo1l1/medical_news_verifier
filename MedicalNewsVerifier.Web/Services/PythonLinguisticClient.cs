@@ -7,12 +7,16 @@ public class PythonLinguisticClient(IConfiguration configuration, IWebHostEnviro
 {
     private const int StderrPreviewMaxChars = 400;
 
-    public async Task<PythonAnalysisOutcome> AnalyzeAsync(string text, CancellationToken cancellationToken)
+    public async Task<PythonAnalysisOutcome> AnalyzeAsync(
+        string text,
+        EffectiveAnalysisRunSettings? runSettings,
+        CancellationToken cancellationToken)
     {
         var pythonExe = configuration["Python:ExecutablePath"] ?? "python";
         var scriptRelativePath = configuration["Python:ScriptPath"] ?? "python/analyze_text.py";
         var scriptPath = Path.Combine(env.ContentRootPath, scriptRelativePath);
-        var timeoutSeconds = configuration.GetValue<int?>("Python:TimeoutSeconds") ?? 8;
+        var timeoutSeconds = runSettings?.PythonTimeoutSeconds
+            ?? configuration.GetValue<int?>("Python:TimeoutSeconds") ?? 8;
 
         if (!File.Exists(scriptPath))
         {
@@ -35,12 +39,17 @@ public class PythonLinguisticClient(IConfiguration configuration, IWebHostEnviro
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.Environment["MEDNEWS_LEXICON_ROOT"] = lexiconRoot;
 
-        if (configuration.GetValue<bool>("Python:EnableNatasha"))
+        var enableNatasha = runSettings?.PythonEnableNatasha
+            ?? configuration.GetValue("Python:EnableNatasha", false);
+        var enableStanza = runSettings?.PythonEnableStanza
+            ?? configuration.GetValue("Python:EnableStanza", false);
+
+        if (enableNatasha)
         {
             startInfo.Environment["MEDNEWS_ENABLE_NATASHA"] = "1";
         }
 
-        if (configuration.GetValue<bool>("Python:EnableStanza"))
+        if (enableStanza)
         {
             startInfo.Environment["MEDNEWS_ENABLE_STANZA"] = "1";
         }

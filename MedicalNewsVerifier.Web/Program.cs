@@ -51,6 +51,7 @@ builder.Services.AddScoped<IRelevantCorpusService, RelevantCorpusService>();
 
 builder.Services.AddHttpClient<IOfficialSourceFetcher, OfficialSourceFetcher>();
 builder.Services.AddHttpClient();
+builder.Services.AddScoped<IAnalysisDefaultsService, AnalysisDefaultsService>();
 builder.Services.AddScoped<IAnalysisReportExporter, AnalysisReportExporter>();
 builder.Services.AddScoped<ISystemDiagnosticsService, SystemDiagnosticsService>();
 builder.Services.AddScoped<INewsAnalysisService, NewsAnalysisService>();

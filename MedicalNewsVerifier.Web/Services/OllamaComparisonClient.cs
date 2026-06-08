@@ -62,18 +62,45 @@ public sealed partial class OllamaComparisonClient(
         string headline,
         string newsBody,
         IReadOnlyList<OfficialPublication> corpusExcerpts,
+        EffectiveAnalysisRunSettings? runSettings,
         CancellationToken cancellationToken)
     {
         var opt = options.Value;
-        if (!opt.Enabled)
+        var ollamaEnabled = runSettings?.OllamaEnabled ?? opt.Enabled;
+        if (!ollamaEnabled)
         {
             return new OllamaComparisonOutcome
             {
                 WasAttempted = false,
                 Succeeded = false,
-                ErrorMessage = "Сравнение через Ollama отключено в конфигурации (Ollama:Enabled)."
+                ErrorMessage = runSettings is { OllamaGloballyEnabled: true, OllamaEnabled: false }
+                    ? "Сравнение через Ollama отключено для этой проверки."
+                    : "Сравнение через Ollama отключено в конфигурации (Ollama:Enabled)."
             };
         }
+
+        var maxSnippets = runSettings?.MaxCorpusSnippets ?? opt.MaxCorpusSnippets;
+        var maxChars = runSettings?.MaxCorpusCharsPerSnippet ?? opt.MaxCorpusCharsPerSnippet;
+        var maxTokens = runSettings?.MaxResponseTokens ?? opt.MaxResponseTokens;
+        var temperature = runSettings?.Temperature ?? opt.Temperature;
+        var topP = runSettings?.TopP ?? opt.TopP;
+        var enableThinking = runSettings?.EnableThinking ?? opt.EnableThinking;
+
+        var callOpt = new OllamaOptions
+        {
+            Enabled = ollamaEnabled,
+            BaseUrl = opt.BaseUrl,
+            Model = opt.Model,
+            TimeoutSeconds = opt.TimeoutSeconds,
+            MaxCorpusSnippets = maxSnippets,
+            MaxCorpusCharsPerSnippet = maxChars,
+            MaxResponseTokens = maxTokens,
+            ForceJsonResponseFormat = opt.ForceJsonResponseFormat,
+            PreferNativeApi = opt.PreferNativeApi,
+            EnableThinking = enableThinking,
+            Temperature = temperature,
+            TopP = topP
+        };
 
         if (string.IsNullOrWhiteSpace(opt.Model))
         {
@@ -97,7 +124,7 @@ public sealed partial class OllamaComparisonClient(
         }
 
         var corpusIsWeak = IsCorpusWeakForFactCheck(corpusExcerpts);
-        var corpusBlock = BuildCorpusBlock(corpusExcerpts, opt.MaxCorpusSnippets, opt.MaxCorpusCharsPerSnippet);
+        var corpusBlock = BuildCorpusBlock(corpusExcerpts, callOpt.MaxCorpusSnippets, callOpt.MaxCorpusCharsPerSnippet);
         var systemPrompt =
             """
             Ты — медицинский фактчекер. Сравни новость с выдержками корпуса.
@@ -145,7 +172,7 @@ public sealed partial class OllamaComparisonClient(
         try
         {
             var parsed = await TryGetParsedModelJsonAsync(
-                opt,
+                callOpt,
                 systemPrompt,
                 userPrompt,
                 cancellationToken);

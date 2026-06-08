@@ -4,7 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - MedNews Verifier</title>
-    <script type="importmap"></script>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
@@ -13,55 +12,41 @@
 <body>
     @{
         var controller = ViewContext.RouteData.Values["controller"]?.ToString() ?? "";
+        var action = ViewContext.RouteData.Values["action"]?.ToString() ?? "";
+        string NavClass(string c, string? a = null) =>
+            controller == c && (a is null || action == a) ? "nav-link active fw-semibold" : "nav-link text-dark";
     }
-    <header>
-        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
-            <div class="container-fluid">
-                <a class="navbar-brand" asp-area="" asp-controller="Home" asp-action="Index">
+    <header class="app-header">
+        <nav class="navbar navbar-expand-sm navbar-light">
+            <div class="container-xl">
+                <a class="navbar-brand d-flex flex-column" asp-controller="Home" asp-action="Index">
                     <span class="fw-bold">MedNews Verifier</span>
+                    <span class="navbar-subtitle">проверка медицинских новостей</span>
                 </a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
-                        aria-expanded="false" aria-label="Toggle navigation">
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain">
                     <span class="navbar-toggler-icon"></span>
                 </button>
-                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1">
-                        <li class="nav-item">
-                            <a class="nav-link @(controller == "Home" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active fw-semibold" : "text-dark")"
-                               asp-area="" asp-controller="Home" asp-action="Index">Проверка</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link @(controller == "Home" && ViewContext.RouteData.Values["action"]?.ToString() == "History" ? "active fw-semibold" : "text-dark")"
-                               asp-area="" asp-controller="Home" asp-action="History">История</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link @(controller == "Sources" ? "active fw-semibold" : "text-dark")"
-                               asp-area="" asp-controller="Sources" asp-action="Index">Источники</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link @(controller == "Corpus" ? "active fw-semibold" : "text-dark")"
-                               asp-area="" asp-controller="Corpus" asp-action="Index">Корпус</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link @(controller == "Home" && ViewContext.RouteData.Values["action"]?.ToString() == "Diagnostics" ? "active fw-semibold" : "text-dark")"
-                               asp-area="" asp-controller="Home" asp-action="Diagnostics">Статус</a>
-                        </li>
+                <div class="navbar-collapse collapse" id="navbarMain">
+                    <ul class="navbar-nav ms-auto gap-lg-1">
+                        <li class="nav-item"><a class="@NavClass("Home", "Index")" asp-controller="Home" asp-action="Index"><i class="bi bi-search me-1"></i>Проверка</a></li>
+                        <li class="nav-item"><a class="@NavClass("Home", "History")" asp-controller="Home" asp-action="History"><i class="bi bi-clock-history me-1"></i>История</a></li>
+                        <li class="nav-item"><a class="@NavClass("Sources")" asp-controller="Sources" asp-action="Index"><i class="bi bi-bookmark me-1"></i>Источники</a></li>
+                        <li class="nav-item"><a class="@NavClass("Corpus")" asp-controller="Corpus" asp-action="Index"><i class="bi bi-journal-text me-1"></i>Корпус</a></li>
+                        <li class="nav-item"><a class="@NavClass("Home", "Diagnostics")" asp-controller="Home" asp-action="Diagnostics"><i class="bi bi-heart-pulse me-1"></i>Статус</a></li>
                     </ul>
                 </div>
             </div>
         </nav>
     </header>
-    <div class="container">
-        <main role="main" class="pb-3">
-            @RenderBody()
-        </main>
-    </div>
 
-    <footer class="border-top footer text-muted">
-        <div class="container">
-            &copy; 2026 - MedNews Verifier
-        </div>
+    <main class="container-xl py-4">
+        @RenderBody()
+    </main>
+
+    <footer class="app-footer border-top">
+        <div class="container-xl py-3 text-muted small">&copy; 2026 — MedNews Verifier</div>
     </footer>
+
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>

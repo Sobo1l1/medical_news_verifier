@@ -15,6 +15,7 @@ public partial class NewsAnalysisService(
     IRelevantCorpusService relevantCorpusService,
     IOllamaComparisonClient ollamaClient,
     IAnalysisJobStore jobStore,
+    IAnalysisDefaultsService analysisDefaultsService,
     IWebHostEnvironment env,
     IConfiguration configuration,
     ILogger<NewsAnalysisService> logger) : INewsAnalysisService
@@ -50,7 +51,10 @@ public partial class NewsAnalysisService(
             }
         }
 
-        var (record, matches) = await AnalyzeAndPersistAsync(input, cancellationToken);
+        var (record, matches) = await AnalyzeAndPersistAsync(
+            input,
+            cancellationToken,
+            runSettings: analysisDefaultsService.Resolve(input.RunSettings));
         return (record, matches, false);
     }
 
@@ -90,8 +94,13 @@ public partial class NewsAnalysisService(
                 }
             }
 
-            var maxCorpusSnippets = configuration.GetValue("Ollama:MaxCorpusSnippets", 4);
-            var publications = await LoadPublicationsCorpusAsync(input.Headline, input.NewsText, cancellationToken);
+            var runSettings = analysisDefaultsService.Resolve(input.RunSettings);
+
+            var publications = await LoadPublicationsCorpusAsync(
+                input.Headline,
+                input.NewsText,
+                runSettings,
+                cancellationToken);
             jobStore.Patch(jobId, s =>
             {
                 s.Phase = "RunningAnalyzers";
@@ -105,7 +114,7 @@ public partial class NewsAnalysisService(
                 input,
                 cancellationToken,
                 publications,
-                maxCorpusSnippets,
+                runSettings,
                 jobId);
 
             jobStore.Patch(jobId, s =>
@@ -163,15 +172,20 @@ public partial class NewsAnalysisService(
         AnalyzeNewsInputModel input,
         CancellationToken cancellationToken,
         List<OfficialPublication>? publications = null,
-        int? maxCorpusSnippets = null,
+        EffectiveAnalysisRunSettings? runSettings = null,
         Guid? jobId = null)
     {
+        runSettings ??= analysisDefaultsService.Resolve(input.RunSettings);
         var doc = AnalyzedDocument.From(input.Headline, input.NewsText);
         var fullText = doc.FullText;
         var lexicons = LoadLexicons();
         var weights = LoadWeights();
-        var pubs = publications ?? await LoadPublicationsCorpusAsync(input.Headline, input.NewsText, cancellationToken);
-        var maxCorpus = maxCorpusSnippets ?? configuration.GetValue("Ollama:MaxCorpusSnippets", 4);
+        var pubs = publications ?? await LoadPublicationsCorpusAsync(
+            input.Headline,
+            input.NewsText,
+            runSettings,
+            cancellationToken);
+        var maxCorpus = runSettings.MaxCorpusSnippets;
 
         var matches = RankMatchesToViewModels(input.Headline, input.NewsText, pubs);
         var corpusForLlm = SelectCorpusForLlm(input.Headline, input.NewsText, pubs, maxCorpus);
@@ -185,8 +199,13 @@ public partial class NewsAnalysisService(
         }
 
         var (lexical, lexicalFragments) = AnalyzeLexicalWithSpans(fullText, lexicons);
-        var pythonTask = pythonClient.AnalyzeAsync(fullText, cancellationToken);
-        var llmTask = ollamaClient.CompareNewsToCorpusAsync(input.Headline, input.NewsText, corpusForLlm, cancellationToken);
+        var pythonTask = pythonClient.AnalyzeAsync(fullText, runSettings, cancellationToken);
+        var llmTask = ollamaClient.CompareNewsToCorpusAsync(
+            input.Headline,
+            input.NewsText,
+            corpusForLlm,
+            runSettings,
+            cancellationToken);
 
         PythonAnalysisOutcome? pythonOutcome = null;
         OllamaComparisonOutcome? llmOutcome = null;
@@ -258,7 +277,7 @@ public partial class NewsAnalysisService(
                     .Concat(MapPythonFragments(pythonOutcome.Fragments))
                     .ToList()));
 
-        var combinedScore = CombineHeuristicAndLlm(heuristicScore.Value, llmOutcome);
+        var combinedScore = CombineHeuristicAndLlm(heuristicScore.Value, llmOutcome, runSettings);
         var submission = await GetOrCreateNewsSubmissionAsync(input, cancellationToken);
 
         var usedPublications = SelectPublicationsUsedInVerification(pubs, matches, corpusForLlm);
@@ -273,7 +292,8 @@ public partial class NewsAnalysisService(
             fragments,
             matches,
             lexical,
-            pythonOutcome);
+            pythonOutcome,
+            runSettings);
 
         if (jobId.HasValue)
         {
@@ -324,7 +344,8 @@ public partial class NewsAnalysisService(
         List<SuspiciousFragment> fragments,
         List<OfficialPublicationMatchVm> matches,
         LexicalFeatures lexical,
-        PythonAnalysisOutcome pythonOutcome)
+        PythonAnalysisOutcome pythonOutcome,
+        EffectiveAnalysisRunSettings runSettings)
     {
         return new AnalysisRecord
         {
@@ -340,7 +361,8 @@ public partial class NewsAnalysisService(
                 fragments.Count,
                 matches.Count,
                 lexical,
-                pythonOutcome),
+                pythonOutcome,
+                runSettings),
             SuspiciousFragments = fragments,
             OfficialPublicationMatches = matches.Select(match => new OfficialPublicationMatch
             {
@@ -362,15 +384,18 @@ public partial class NewsAnalysisService(
         return t.Length <= max ? t : t[..max] + "…";
     }
 
-    private int CombineHeuristicAndLlm(int heuristicScore, OllamaComparisonOutcome llmOutcome)
+    private int CombineHeuristicAndLlm(
+        int heuristicScore,
+        OllamaComparisonOutcome llmOutcome,
+        EffectiveAnalysisRunSettings runSettings)
     {
         if (!llmOutcome.WasAttempted || !llmOutcome.Succeeded || !llmOutcome.AlignmentScore.HasValue)
         {
             return heuristicScore;
         }
 
-        var wh = configuration.GetValue("AnalysisScoring:HeuristicBlendWeight", 0.65);
-        var wl = configuration.GetValue("AnalysisScoring:LlmBlendWeight", 0.35);
+        var wh = runSettings.HeuristicBlendWeight;
+        var wl = runSettings.LlmBlendWeight;
         var sum = wh + wl;
         if (sum <= 0)
         {
@@ -414,11 +439,16 @@ public partial class NewsAnalysisService(
     private async Task<List<OfficialPublication>> LoadPublicationsCorpusAsync(
         string headline,
         string newsText,
+        EffectiveAnalysisRunSettings? runSettings,
         CancellationToken cancellationToken)
     {
         try
         {
-            var relevant = await relevantCorpusService.FetchRelevantAsync(headline, newsText, cancellationToken);
+            var relevant = await relevantCorpusService.FetchRelevantAsync(
+                headline,
+                newsText,
+                runSettings,
+                cancellationToken);
             if (relevant.Count > 0)
             {
                 logger.LogInformation(
@@ -634,7 +664,11 @@ public partial class NewsAnalysisService(
         string text,
         CancellationToken cancellationToken)
     {
-        var pubs = await LoadPublicationsCorpusAsync(headline, text, cancellationToken);
+        var pubs = await LoadPublicationsCorpusAsync(
+            headline,
+            text,
+            analysisDefaultsService.GetDefaults(),
+            cancellationToken);
         return RankMatchesToViewModels(headline, text, pubs);
     }
 
@@ -648,10 +682,12 @@ public partial class NewsAnalysisService(
         int suspiciousCount,
         int matchCount,
         LexicalFeatures lexical,
-        PythonAnalysisOutcome pythonOutcome)
+        PythonAnalysisOutcome pythonOutcome,
+        EffectiveAnalysisRunSettings runSettings)
     {
         var lines = new List<string>
         {
+            runSettings.ToSummaryLine(),
             $"Итоговая оценка достоверности (комбинированная): {combinedScore} из 100.",
             $"Оценка по признакам (лексика, Python, совпадения с корпусом): {heuristicScore} из 100.",
             BuildLlmExplanationLine(llmOutcome),

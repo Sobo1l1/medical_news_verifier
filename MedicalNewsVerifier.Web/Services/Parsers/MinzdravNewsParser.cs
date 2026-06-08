@@ -22,7 +22,8 @@ public sealed class MinzdravNewsParser(
         CancellationToken cancellationToken)
     {
         var feedUrl = configuration["SourceParsers:Minzdrav:FeedUrl"] ?? "https://minzdrav.gov.ru/news.atom";
-        var maxFeedScan = configuration.GetValue("SourceParsers:Minzdrav:MaxFeedScan", 400);
+        var maxFeedScan = query.MaxFeedScan
+            ?? configuration.GetValue("SourceParsers:Minzdrav:MaxFeedScan", 400);
 
         try
         {
