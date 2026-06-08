@@ -20,7 +20,11 @@ public class HistoryFilterViewModel
     // Результаты
     public List<AnalysisRecord> Records { get; set; } = [];
     public int TotalCount { get; set; }
-    public int TotalPages => (TotalCount + PageSize - 1) / PageSize;
+    public int TotalPages => TotalCount == 0 ? 0 : (TotalCount + PageSize - 1) / PageSize;
+
+    public int DisplayFrom => TotalCount == 0 ? 0 : (PageNumber - 1) * PageSize + 1;
+
+    public int DisplayTo => TotalCount == 0 ? 0 : Math.Min(PageNumber * PageSize, TotalCount);
 
     // Статистика
     public int SuspiciousCount { get; set; }

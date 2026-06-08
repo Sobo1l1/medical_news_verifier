@@ -1,9 +1,9 @@
 using MedicalNewsVerifier.Web.Models;
+using MedicalNewsVerifier.Web.Services.Parsers;
 using MedicalNewsVerifier.Web.ViewModels;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
-using System.Net;
 using System.Text.Json;
 
 namespace MedicalNewsVerifier.Web.Services;
@@ -33,66 +33,125 @@ public class AnalysisReportExporter : IAnalysisReportExporter
         try
         {
             matches ??= [];
-            var statusText = ReliabilityThresholds.StatusLabel(record.ReliabilityScore);
+            var statusLabel = ReliabilityThresholds.StatusLabel(record.ReliabilityScore);
+            var statusColor = StatusColor(record.ReliabilityScore);
+            var llmSummary = record.LlmSummary ?? string.Empty;
+            var corpusWeak = matches.Count == 0
+                || llmSummary.Contains("insufficient_corpus", StringComparison.OrdinalIgnoreCase)
+                || (record.LlmAlignmentScore.HasValue && record.LlmAlignmentScore < 25);
+            var explanationLines = record.Explanation
+                .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .ToList();
 
             return Document.Create(container =>
             {
                 container.Page(page =>
                 {
-                    page.Margin(40);
-                    page.DefaultTextStyle(x => x.FontSize(11));
+                    page.Margin(36);
+                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Arial"));
 
-                    page.Header().Column(col =>
+                    page.Content().Column(col =>
                     {
-                        col.Item().Text("Отчёт о проверке медицинской новости").Bold().FontSize(16);
-                        col.Item().Text("MedNews Verifier").FontColor(Colors.Grey.Medium);
-                    });
+                        col.Spacing(10);
 
-                    page.Content().PaddingVertical(10).Column(col =>
-                    {
-                        col.Spacing(8);
-                        col.Item().Text($"Заголовок: {record.Headline}").Bold();
-                        col.Item().Text($"Статус: {statusText}");
-                        col.Item().Text($"Эвристика: {record.HeuristicReliabilityScore}/100");
-                        if (record.LlmAlignmentScore.HasValue)
+                        col.Item().Text("MedNews Verifier").FontSize(9).FontColor(Colors.Grey.Medium);
+                        col.Item().Text("Результат проверки медицинской новости").Bold().FontSize(18);
+
+                        col.Item().BorderLeft(4).BorderColor(statusColor).Padding(12).Column(card =>
                         {
-                            col.Item().Text($"Ollama (согласованность с корпусом): {record.LlmAlignmentScore}/100");
-                        }
+                            card.Spacing(8);
+                            card.Item().Row(row =>
+                            {
+                                row.Spacing(8);
+                                row.AutoItem().Background(statusColor).PaddingHorizontal(10).PaddingVertical(4)
+                                    .Text(statusLabel).Bold().FontColor(Colors.White).FontSize(11);
+                                row.AutoItem().AlignMiddle().Text($"Итог: {record.ReliabilityScore}/100").Bold().FontSize(16);
+                            });
 
-                        col.Item().Text($"Итог: {record.ReliabilityScore}/100").Bold();
+                            card.Item().Row(scores =>
+                            {
+                                scores.Spacing(8);
+                                ScoreBox(scores, AnalysisUiLabels.FeatureAnalysis, $"{record.HeuristicReliabilityScore}/100");
+                                ScoreBox(scores, AnalysisUiLabels.NeuralAnalysis,
+                                    record.LlmAlignmentScore?.ToString() + "/100" ?? "—");
+                                ScoreBox(scores, "Итог", $"{record.ReliabilityScore}/100");
+                            });
 
-                        if (!string.IsNullOrWhiteSpace(record.Explanation))
-                        {
-                            col.Item().PaddingTop(8).Text("Анализ").Bold();
-                            col.Item().Text(Truncate(record.Explanation, 1200));
-                        }
+                            if (corpusWeak)
+                            {
+                                card.Item().Background(Colors.Yellow.Lighten4).Padding(8).Text(text =>
+                                {
+                                    text.Span("Согласованность с корпусом ограничена. ").Bold();
+                                    text.Span(matches.Count == 0
+                                        ? "Релевантные официальные материалы не найдены."
+                                        : "Найденные материалы слабо связаны с темой новости.");
+                                });
+                            }
+
+                            if (matches.Count > 0)
+                            {
+                                card.Item().Text($"Источники, использованные при проверке ({matches.Count})").Bold().FontSize(10);
+                                foreach (var m in matches.Take(8))
+                                {
+                                    card.Item().Text($"• [{m.RelevanceLabel}] {m.SourceName} — {m.Title} ({m.RelevanceScore}%)");
+                                }
+                            }
+                        });
+
+                        col.Item().Text("Подробный результат").Bold().FontSize(13);
 
                         if (!string.IsNullOrWhiteSpace(record.LlmSummary))
                         {
-                            col.Item().PaddingTop(8).Text("Мнение модели (LLM)").Bold();
-                            col.Item().Text(Truncate(record.LlmSummary, 600));
+                            col.Item().Background("#E7F1FF").Padding(10).Column(block =>
+                            {
+                                block.Item().Text($"Краткое резюме ({AnalysisUiLabels.NeuralAnalysis})").Bold();
+                                block.Item().Text(Truncate(record.LlmSummary, 900));
+                            });
+                        }
+
+                        if (explanationLines.Count > 0)
+                        {
+                            col.Item().Text("Сводка автоматического анализа").Bold();
+                            foreach (var line in explanationLines.Take(12))
+                            {
+                                col.Item().PaddingLeft(8).Text($"— {Truncate(line, 300)}");
+                            }
                         }
 
                         if (record.SuspiciousFragments.Count > 0)
                         {
-                            col.Item().PaddingTop(8).Text($"Признаки ({record.SuspiciousFragments.Count})").Bold();
-                            foreach (var fragment in record.SuspiciousFragments.Take(8))
+                            col.Item().PaddingTop(4).Text($"Выявленные признаки ({record.SuspiciousFragments.Count})").Bold();
+                            foreach (var fragment in record.SuspiciousFragments.Take(10))
                             {
-                                col.Item().Text($"• {FeatureKindMetadata.Title((SuspiciousFeatureKind)fragment.FeatureKindId)}: {Truncate(fragment.Reason, 200)}");
+                                col.Item().Background(Colors.Yellow.Lighten5).BorderLeft(3).BorderColor(Colors.Orange.Medium)
+                                    .Padding(6).Column(f =>
+                                    {
+                                        f.Item().Text(FeatureKindMetadata.Title((SuspiciousFeatureKind)fragment.FeatureKindId)).Bold();
+                                        f.Item().Text(Truncate(fragment.Reason, 220)).FontSize(9);
+                                    });
                             }
                         }
 
                         if (matches.Count > 0)
                         {
-                            col.Item().PaddingTop(8).Text("Официальные источники").Bold();
-                            foreach (var match in matches.Take(10))
+                            col.Item().PaddingTop(4).Text("Релевантные официальные публикации").Bold();
+                            foreach (var m in matches)
                             {
-                                col.Item().Text($"• {match.SourceName}: {match.Title} ({match.RelevanceScore}%)");
+                                col.Item().Row(row =>
+                                {
+                                    row.RelativeItem().Column(c =>
+                                    {
+                                        c.Item().Text($"{m.SourceName}: {m.Title}").Bold();
+                                        c.Item().Text(m.Url).FontSize(8).FontColor(Colors.Blue.Medium);
+                                    });
+                                    row.ConstantItem(90).AlignRight()
+                                        .Text($"{m.RelevanceLabel}\n{m.RelevanceScore}%").FontSize(9);
+                                });
                             }
                         }
 
-                        col.Item().PaddingTop(12).Text($"Дата проверки: {record.CreatedAtUtc:dd.MM.yyyy HH:mm} UTC")
-                            .FontColor(Colors.Grey.Medium).FontSize(9);
+                        col.Item().PaddingTop(8).Text($"Дата проверки: {record.CreatedAtUtc:dd.MM.yyyy HH:mm} UTC")
+                            .FontColor(Colors.Grey.Medium).FontSize(8);
                     });
                 });
             }).GeneratePdf();
@@ -119,8 +178,8 @@ public class AnalysisReportExporter : IAnalysisReportExporter
                 statusLabel = ReliabilityThresholds.StatusLabel(record.ReliabilityScore),
                 scores = new
                 {
-                    heuristic = record.HeuristicReliabilityScore,
-                    llm = record.LlmAlignmentScore,
+                    featureAnalysis = record.HeuristicReliabilityScore,
+                    neuralNetwork = record.LlmAlignmentScore,
                     overall = record.ReliabilityScore
                 },
                 explanation = record.Explanation,
@@ -139,7 +198,7 @@ public class AnalysisReportExporter : IAnalysisReportExporter
                     m.Title,
                     m.Url,
                     m.RelevanceScore,
-                    m.HasStatistics
+                    m.RelevanceLabel
                 }).ToList(),
                 createdAtUtc = record.CreatedAtUtc
             };
@@ -153,6 +212,22 @@ public class AnalysisReportExporter : IAnalysisReportExporter
             throw;
         }
     }
+
+    private static void ScoreBox(RowDescriptor row, string label, string value)
+    {
+        row.RelativeItem().Border(1).BorderColor(Colors.Grey.Lighten2).Padding(8).Column(c =>
+        {
+            c.Item().Text(label).FontSize(8).FontColor(Colors.Grey.Darken1);
+            c.Item().Text(value).Bold().FontSize(12);
+        });
+    }
+
+    private static string StatusColor(int score) => score switch
+    {
+        >= ReliabilityThresholds.ReliableMin => Colors.Green.Medium,
+        <= ReliabilityThresholds.SuspiciousMax => Colors.Red.Medium,
+        _ => Colors.Orange.Medium
+    };
 
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..(maxLength - 1)] + "…";

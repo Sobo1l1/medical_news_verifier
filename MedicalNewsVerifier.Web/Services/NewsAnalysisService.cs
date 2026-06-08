@@ -74,6 +74,9 @@ public partial class NewsAnalysisService(
                     jobStore.Patch(jobId, s =>
                     {
                         s.Phase = "Completed";
+                        s.FeaturesCompleted = true;
+                        s.NeuralCompleted = true;
+                        s.StepIndex = 4;
                         s.Message = "Найдена сохранённая проверка с теми же заголовком и текстом.";
                         s.HeuristicScore = existing.HeuristicReliabilityScore > 0
                             ? existing.HeuristicReliabilityScore
@@ -93,7 +96,9 @@ public partial class NewsAnalysisService(
             {
                 s.Phase = "RunningAnalyzers";
                 s.StepIndex = 1;
-                s.Message = "Параллельно выполняются эвристический модуль (Python) и сравнение с корпусом через Ollama…";
+                s.FeaturesCompleted = false;
+                s.NeuralCompleted = false;
+                s.Message = "Параллельно выполняются признаковый анализ (Python) и нейросетевое сравнение с корпусом (Ollama)…";
             });
 
             var (record, jobMatches) = await AnalyzeAndPersistAsync(
@@ -106,6 +111,8 @@ public partial class NewsAnalysisService(
             jobStore.Patch(jobId, s =>
             {
                 s.Phase = "Completed";
+                s.FeaturesCompleted = true;
+                s.NeuralCompleted = true;
                 s.RecordId = record.Id;
                 s.CombinedScore = record.ReliabilityScore;
                 s.Message = "Анализ завершён.";
@@ -173,7 +180,7 @@ public partial class NewsAnalysisService(
         {
             jobStore.Patch(jobId.Value, s =>
             {
-                s.Message = "Параллельно выполняются эвристический модуль (Python) и сравнение с корпусом через Ollama…";
+                s.Message = "Параллельно выполняются признаковый анализ (Python) и нейросетевое сравнение с корпусом (Ollama)…";
             });
         }
 
@@ -205,9 +212,12 @@ public partial class NewsAnalysisService(
                     jobStore.Patch(jobId.Value, s =>
                     {
                         s.Phase = "HeuristicReady";
-                        s.StepIndex = 1;
+                        s.FeaturesCompleted = true;
+                        s.StepIndex = s.NeuralCompleted ? 3 : 2;
                         s.HeuristicScore = heuristicScore;
-                        s.Message = "Эвристический и Python-анализ завершены. Формируем итог с учётом нейросети…";
+                        s.Message = s.NeuralCompleted
+                            ? "Признаковый и нейросетевой анализ завершены. Формируется итог…"
+                            : "Признаковый анализ завершён. Выполняется нейросетевой анализ (Ollama)…";
                     });
                 }
             }
@@ -219,14 +229,17 @@ public partial class NewsAnalysisService(
                     jobStore.Patch(jobId.Value, s =>
                     {
                         s.Phase = "LlmReady";
-                        s.StepIndex = 2;
+                        s.NeuralCompleted = true;
+                        s.StepIndex = s.FeaturesCompleted ? 3 : 2;
                         s.LlmScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null;
                         s.LlmSummaryPreview = llmOutcome.Succeeded
                             ? TruncateForJob(llmOutcome.Summary)
                             : TruncateForJob(llmOutcome.ErrorMessage);
                         s.Message = llmOutcome.Succeeded
-                            ? "Нейросетевой этап завершён. Собираем итоговый результат…"
-                            : "Нейросетевой этап завершился с ошибкой; итог будет по эвристике.";
+                            ? s.FeaturesCompleted
+                                ? "Нейросетевой и признаковый анализ завершены. Собираем итоговый результат…"
+                                : "Нейросетевой анализ завершён. Выполняется признаковый анализ…"
+                            : "Нейросетевой этап завершился с ошибкой; итог будет по признаковому анализу.";
                     });
                 }
             }
@@ -267,6 +280,8 @@ public partial class NewsAnalysisService(
             jobStore.Patch(jobId.Value, s =>
             {
                 s.Phase = "Combining";
+                s.FeaturesCompleted = true;
+                s.NeuralCompleted = true;
                 s.StepIndex = 3;
                 s.CombinedScore = combinedScore;
                 s.Message = "Сохранение результата…";
@@ -638,7 +653,7 @@ public partial class NewsAnalysisService(
         var lines = new List<string>
         {
             $"Итоговая оценка достоверности (комбинированная): {combinedScore} из 100.",
-            $"Эвристическая оценка (лексика, Python, совпадения с корпусом): {heuristicScore} из 100.",
+            $"Оценка по признакам (лексика, Python, совпадения с корпусом): {heuristicScore} из 100.",
             BuildLlmExplanationLine(llmOutcome),
             $"Выделено фрагментов в тексте (маркеров): {suspiciousCount}.",
             "Счётчики эмоциональной, манипулятивной и оценочной лексики ниже — по правилам приложения (C#); они не зависят от дополнительного модуля Python.",
@@ -651,7 +666,7 @@ public partial class NewsAnalysisService(
             matchCount > 0
                 ? "Сопоставление с официальными материалами: есть пересечения по тексту."
                 : "Сопоставление с официальными материалами: релевантных совпадений по выбранным источникам не найдено.",
-            "Оценка локальной LLM (Ollama) носит вспомогательный характер и не заменяет экспертизу врача или официальных рекомендаций."
+            "Оценка нейросети (Ollama) носит вспомогательный характер и не заменяет экспертизу врача или официальных рекомендаций."
         };
 
         var explanation = string.Join('\n', lines);
@@ -663,7 +678,7 @@ public partial class NewsAnalysisService(
     {
         if (!llm.WasAttempted)
         {
-            return "Локальная модель (Ollama): отключена в настройках (Ollama:Enabled). Итоговая оценка совпадает с эвристикой.";
+            return "Нейросеть (Ollama): отключена в настройках (Ollama:Enabled). Итоговая оценка совпадает с признаковым анализом.";
         }
 
         if (llm.Succeeded && llm.AlignmentScore.HasValue)
@@ -683,11 +698,11 @@ public partial class NewsAnalysisService(
                 }
                 tail = $" Кратко: {summary}";
             }
-            return $"Локальная модель (Ollama): согласованность с выдержками корпуса — {llm.AlignmentScore} из 100.{tail}";
+            return $"Нейросеть (Ollama): согласованность с выдержками корпуса — {llm.AlignmentScore} из 100.{tail}";
         }
 
         var err = string.IsNullOrWhiteSpace(llm.ErrorMessage) ? "см. логи приложения" : llm.ErrorMessage.Trim();
-        return $"Локальная модель (Ollama): не удалось получить оценку ({err}). Итог рассчитан по эвристике.";
+        return $"Нейросеть (Ollama): не удалось получить оценку ({err}). Итог рассчитан по признаковому анализу.";
     }
 
     private static string BuildPythonExplanationLine(PythonAnalysisOutcome o)
@@ -713,7 +728,7 @@ public partial class NewsAnalysisService(
         var n = o.Fragments.Count;
         if (n > 0)
         {
-            return $"Дополнительный модуль (Python): возвращено {n} фрагментов (словари RU/EN и эвристики в скрипте).";
+            return $"Дополнительный модуль (Python): возвращено {n} фрагментов (словари RU/EN и правила в скрипте).";
         }
 
         return "Дополнительный модуль (Python): выполнен успешно, дополнительных фрагментов не вернул; маркеры в тексте при этом могут полностью относиться к анализу приложения (C#).";

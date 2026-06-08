@@ -120,11 +120,11 @@
     {
         <div class="card shadow-sm">
             <div class="card-header bg-light">
-                <h6 class="mb-0">Результаты (@Model.PageNumber of @Model.TotalPages)</h6>
+                <h6 class="mb-0">Записи @Model.DisplayFrom–@Model.DisplayTo из @Model.TotalCount@if (Model.TotalPages > 1){<text> (страница @Model.PageNumber из @Model.TotalPages)</text>}</h6>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0">
+                    <table class="table table-hover table-striped align-middle mb-0 history-table">
                         <thead class="table-light">
                             <tr>
                                 <th style="width: 40%;">Заголовок</th>
@@ -151,14 +151,7 @@
                                     _ => "Достоверна"
                                 };
 
-                                var rowClass = record.Status switch
-                                {
-                                    VerificationStatus.Suspicious => "table-danger",
-                                    VerificationStatus.NeedsReview => "table-warning",
-                                    _ => ""
-                                };
-
-                                <tr class="@rowClass">
+                                <tr>
                                     <td>
                                         <strong>
                                             @if (record.Headline.Length > 50)
@@ -258,6 +251,10 @@
 
     table tbody tr:hover {
         background-color: rgba(0, 123, 255, 0.05);
+    }
+
+    .history-table.table-striped > tbody > tr:nth-of-type(even) > * {
+        background-color: rgba(0, 0, 0, 0.03);
     }
 
     .btn-outline-primary:hover {

@@ -229,6 +229,20 @@ public static partial class RelevanceScoring
         }
     }
 
+    public static string RelevanceLabel(int score) => score switch
+    {
+        >= 40 => "Релевантный",
+        >= 22 => "Частично релевантный",
+        _ => "Нерелевантный"
+    };
+
+    public static string RelevanceBadgeClass(int score) => score switch
+    {
+        >= 40 => "success",
+        >= 22 => "warning",
+        _ => "secondary"
+    };
+
     [GeneratedRegex(@"\b\d{4,}\b")]
     private static partial Regex LargeNumberRegex();
 }

@@ -1,4 +1,5 @@
 using MedicalNewsVerifier.Web.Models;
+using MedicalNewsVerifier.Web.Services.Parsers;
 
 namespace MedicalNewsVerifier.Web.ViewModels;
 
@@ -29,4 +30,8 @@ public class OfficialPublicationMatchVm
     public string Url { get; set; } = string.Empty;
     public int RelevanceScore { get; set; }
     public bool HasStatistics { get; set; }
+
+    public string RelevanceLabel => RelevanceScoring.RelevanceLabel(RelevanceScore);
+
+    public string RelevanceBadgeClass => RelevanceScoring.RelevanceBadgeClass(RelevanceScore);
 }

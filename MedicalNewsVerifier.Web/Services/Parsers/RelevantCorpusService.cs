@@ -42,7 +42,18 @@ public sealed class RelevantCorpusService(
             MinRelevanceScore = expectsStats ? Math.Max(minRelevance, 18) : minRelevance
         };
 
+        var corpusInDb = await db.OfficialPublications
+            .Include(p => p.TrustedSource)
+            .AsNoTracking()
+            .Where(p => p.TrustedSource!.IsEnabled)
+            .ToListAsync(cancellationToken);
+
+        var corpusByUrl = corpusInDb
+            .GroupBy(p => HtmlTextExtractor.NormalizeUrl(p.Url), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
         var candidates = new List<(ParsedPublication Parsed, TrustedSource Source, int Score)>();
+        var candidateUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var minzdravSource = await db.TrustedSources
             .AsNoTracking()
@@ -55,13 +66,14 @@ public sealed class RelevantCorpusService(
             IsEnabled = true
         };
 
+        // 1. Парсинг источников (с проверкой дубликатов в корпусе)
         try
         {
             var fromStats = await statisticsEnricher.EnrichAsync(headline, newsText, query, cancellationToken);
             foreach (var pub in fromStats)
             {
                 var score = RelevanceScoring.CalculateMatchScore(headline, newsText, $"{pub.Title} {pub.Content}");
-                candidates.Add((pub, statsSource, score + 40));
+                TryAddCandidate(candidates, candidateUrls, corpusByUrl, corpusInDb, pub, statsSource, score + 40);
             }
         }
         catch (Exception ex)
@@ -78,7 +90,7 @@ public sealed class RelevantCorpusService(
             foreach (var pub in fromReferencedUrls)
             {
                 var score = RelevanceScoring.CalculateMatchScore(headline, newsText, $"{pub.Title} {pub.Content}");
-                candidates.Add((pub, urlSource, score + 25));
+                TryAddCandidate(candidates, candidateUrls, corpusByUrl, corpusInDb, pub, urlSource, score + 25);
             }
         }
         catch (Exception ex)
@@ -130,7 +142,7 @@ public sealed class RelevantCorpusService(
                         continue;
                     }
 
-                    candidates.Add((pub, source, score));
+                    TryAddCandidate(candidates, candidateUrls, corpusByUrl, corpusInDb, pub, source, score);
                 }
             }
             catch (Exception ex)
@@ -139,14 +151,15 @@ public sealed class RelevantCorpusService(
             }
         }
 
-        var manualFromDb = await db.OfficialPublications
-            .Include(p => p.TrustedSource)
-            .AsNoTracking()
-            .Where(p => p.TrustedSource!.IsEnabled)
-            .ToListAsync(cancellationToken);
-
-        foreach (var pub in manualFromDb)
+        // 2. Корпус БД — только материалы, ещё не добавленные при парсинге
+        foreach (var pub in corpusInDb)
         {
+            var normalizedUrl = HtmlTextExtractor.NormalizeUrl(pub.Url);
+            if (candidateUrls.Contains(normalizedUrl))
+            {
+                continue;
+            }
+
             var combined = $"{pub.Title} {pub.Content}";
             if (newsTopic == NewsTopic.Oncology && RelevanceScoring.IsPrimarilyRespiratory(combined))
             {
@@ -156,26 +169,18 @@ public sealed class RelevantCorpusService(
             var score = RelevanceScoring.CalculateMatchScore(headline, newsText, combined);
             if (score >= query.MinRelevanceScore)
             {
-                candidates.Add((
-                    new ParsedPublication
-                    {
-                        Title = pub.Title,
-                        Content = pub.Content,
-                        Url = pub.Url,
-                        PublishedAtUtc = pub.PublishedAtUtc
-                    },
+                TryAddCandidate(
+                    candidates,
+                    candidateUrls,
+                    corpusByUrl,
+                    corpusInDb,
+                    ToParsed(pub),
                     pub.TrustedSource!,
-                    score));
+                    score);
             }
         }
 
-        var selected = candidates
-            .GroupBy(c => HtmlTextExtractor.NormalizeUrl(c.Parsed.Url), StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.OrderByDescending(x => x.Score).First())
-            .OrderByDescending(c => c.Score)
-            .ThenByDescending(c => RelevanceScoring.CandidateHasStatistics($"{c.Parsed.Title} {c.Parsed.Content}") ? 1 : 0)
-            .Take(maxArticles)
-            .ToList();
+        var selected = SelectTopCandidates(candidates, maxArticles);
 
         var maxScore = selected.Count > 0 ? selected.Max(c => c.Score) : 0;
         var staleCorpus = selected.Count > 0
@@ -223,7 +228,7 @@ public sealed class RelevantCorpusService(
                         }
 
                         var score = RelevanceScoring.CalculateMatchScore(headline, newsText, combined);
-                        candidates.Add((pub, source, score));
+                        TryAddCandidate(candidates, candidateUrls, corpusByUrl, corpusInDb, pub, source, score);
                     }
                 }
                 catch (Exception ex)
@@ -232,13 +237,7 @@ public sealed class RelevantCorpusService(
                 }
             }
 
-            selected = candidates
-                .GroupBy(c => HtmlTextExtractor.NormalizeUrl(c.Parsed.Url), StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.OrderByDescending(x => x.Score).First())
-                .OrderByDescending(c => c.Score)
-                .ThenByDescending(c => RelevanceScoring.CandidateHasStatistics($"{c.Parsed.Title} {c.Parsed.Content}") ? 1 : 0)
-                .Take(maxArticles + 5)
-                .ToList();
+            selected = SelectTopCandidates(candidates, maxArticles + 5);
         }
 
         logger.LogInformation(
@@ -325,4 +324,105 @@ public sealed class RelevantCorpusService(
 
         return result;
     }
+
+    private static List<(ParsedPublication Parsed, TrustedSource Source, int Score)> SelectTopCandidates(
+        List<(ParsedPublication Parsed, TrustedSource Source, int Score)> candidates,
+        int take) =>
+        candidates
+            .GroupBy(c => HtmlTextExtractor.NormalizeUrl(c.Parsed.Url), StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(x => x.Score).First())
+            .OrderByDescending(c => c.Score)
+            .ThenByDescending(c => RelevanceScoring.CandidateHasStatistics($"{c.Parsed.Title} {c.Parsed.Content}") ? 1 : 0)
+            .Take(take)
+            .ToList();
+
+    private static void TryAddCandidate(
+        List<(ParsedPublication Parsed, TrustedSource Source, int Score)> candidates,
+        HashSet<string> candidateUrls,
+        Dictionary<string, OfficialPublication> corpusByUrl,
+        List<OfficialPublication> corpusInDb,
+        ParsedPublication parsed,
+        TrustedSource source,
+        int score)
+    {
+        var normalizedUrl = HtmlTextExtractor.NormalizeUrl(parsed.Url);
+        if (string.IsNullOrWhiteSpace(normalizedUrl))
+        {
+            return;
+        }
+
+        if (corpusByUrl.TryGetValue(normalizedUrl, out var existingByUrl))
+        {
+            parsed = ToParsed(existingByUrl);
+            source = existingByUrl.TrustedSource ?? source;
+            normalizedUrl = HtmlTextExtractor.NormalizeUrl(parsed.Url);
+        }
+        else
+        {
+            var similar = FindSimilarPublication(corpusInDb, parsed);
+            if (similar is not null)
+            {
+                parsed = ToParsed(similar);
+                source = similar.TrustedSource ?? source;
+                normalizedUrl = HtmlTextExtractor.NormalizeUrl(parsed.Url);
+            }
+        }
+
+        if (candidateUrls.Contains(normalizedUrl))
+        {
+            return;
+        }
+
+        candidates.Add((parsed, source, score));
+        candidateUrls.Add(normalizedUrl);
+    }
+
+    private static OfficialPublication? FindSimilarPublication(List<OfficialPublication> corpus, ParsedPublication parsed)
+    {
+        var titleNorm = NormalizeTitle(parsed.Title);
+        if (titleNorm.Length < 10)
+        {
+            return null;
+        }
+
+        foreach (var pub in corpus)
+        {
+            var existingNorm = NormalizeTitle(pub.Title);
+            if (TitlesAreSimilar(titleNorm, existingNorm))
+            {
+                return pub;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TitlesAreSimilar(string a, string b)
+    {
+        if (a == b)
+        {
+            return true;
+        }
+
+        if (a.Length < 10 || b.Length < 10)
+        {
+            return false;
+        }
+
+        var shorter = a.Length <= b.Length ? a : b;
+        var longer = a.Length > b.Length ? a : b;
+        return longer.Contains(shorter, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeTitle(string title) =>
+        string.Join(' ', title.ToLowerInvariant()
+            .Split([' ', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    private static ParsedPublication ToParsed(OfficialPublication pub) => new()
+    {
+        Title = pub.Title,
+        Content = pub.Content,
+        Url = pub.Url,
+        PublishedAtUtc = pub.PublishedAtUtc
+    };
 }

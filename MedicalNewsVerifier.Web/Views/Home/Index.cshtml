@@ -10,14 +10,14 @@
         <p class="text-muted small mb-3">MedNews Verifier — проверка текстов медицинских новостей</p>
         <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
             <span class="badge @(ollamaOn ? "bg-success" : "bg-secondary")">
-                Ollama: @(ollamaOn ? "включена" : "выключена")
+                Нейросеть Ollama: @(ollamaOn ? "включена" : "выключена")
             </span>
             <a class="small" asp-controller="Home" asp-action="Diagnostics">Статус системы</a>
         </div>
         <div class="alert alert-secondary">
             Анализ учитывает лексические, пунктуационные и структурные признаки (C#), дополнительный модуль Python,
             совпадения с корпусом доверенных материалов и параллельно — сравнение с тем же корпусом через локальную модель
-            <strong>Ollama</strong>. Ход анализа отображается ниже по мере готовности этапов.
+                Нейросеть <strong>Ollama</strong>. Ход анализа отображается ниже по мере готовности этапов.
         </div>
         <div id="analysisProgressHost" class="card border-primary mb-3 shadow-sm d-none" aria-live="polite">
             <div class="card-body py-3">
@@ -27,21 +27,21 @@
                 </div>
                 <div class="analysis-stepper mb-3" id="analysisStepper">
                     <div class="analysis-step" data-step="0"><span class="step-dot"></span><span class="step-label">Источники</span></div>
-                    <div class="analysis-step" data-step="1"><span class="step-dot"></span><span class="step-label">Эвристика</span></div>
-                    <div class="analysis-step" data-step="2"><span class="step-dot"></span><span class="step-label">Ollama</span></div>
+                    <div class="analysis-step" data-step="1"><span class="step-dot"></span><span class="step-label">@AnalysisUiLabels.FeatureAnalysisShort</span></div>
+                    <div class="analysis-step" data-step="2"><span class="step-dot"></span><span class="step-label">@AnalysisUiLabels.NeuralAnalysisShort</span></div>
                     <div class="analysis-step" data-step="3"><span class="step-dot"></span><span class="step-label">Сохранение</span></div>
                 </div>
                 <p class="small text-muted mb-2" id="analysisProgressMessage">Подготовка…</p>
                 <div class="row g-2 small">
                     <div class="col-md-4">
                         <div class="border rounded p-2 bg-light">
-                            <div class="text-muted">Эвристика</div>
+                            <div class="text-muted">@AnalysisUiLabels.FeatureAnalysisShort</div>
                             <div id="analysisHeuristicScore" class="fs-5">—</div>
                         </div>
                     </div>
                     <div class="col-md-4">
                         <div class="border rounded p-2 bg-light">
-                            <div class="text-muted">Ollama (LLM)</div>
+                            <div class="text-muted">@AnalysisUiLabels.NeuralAnalysis</div>
                             <div id="analysisLlmScore" class="fs-5">—</div>
                         </div>
                     </div>
@@ -128,7 +128,7 @@
                         @if (llmHasSummary)
                         {
                             <div class="@llmSummaryBlockClass small mb-3">
-                                <div class="fw-semibold mb-1">Краткое резюме модели (Ollama)</div>
+                                <div class="fw-semibold mb-1">Краткое резюме (@AnalysisUiLabels.NeuralAnalysis)</div>
                                 <div class="text-break mb-0">@Model.LastAnalysis.LlmSummary</div>
                             </div>
                         }
@@ -239,14 +239,13 @@
                         <ul class="list-group">
                             @foreach (var source in Model.OfficialMatches)
                             {
-                                var relClass = source.RelevanceScore >= 40 ? "success" : source.RelevanceScore >= 22 ? "warning" : "secondary";
                                 <li class="list-group-item d-flex justify-content-between align-items-center">
                                     <div>
                                         <div><strong>@source.SourceName</strong>: @source.Title</div>
                                         <a href="@source.Url" target="_blank" rel="noopener">@source.Url</a>
                                     </div>
-                                    <span class="badge bg-@relClass"
-                                          title="Совпадение по ключевым словам и теме новости">@source.RelevanceScore%</span>
+                                    <span class="badge bg-@source.RelevanceBadgeClass"
+                                          title="Совпадение по ключевым словам и теме новости">@source.RelevanceLabel (@source.RelevanceScore%)</span>
                                 </li>
                             }
                         </ul>
@@ -335,26 +334,40 @@
                 });
             }
 
-            function updateStepper(stepIndex) {
+            function updateStepper(state) {
+                const phase = state?.phase ?? '';
+                const featuresDone = !!state?.featuresCompleted
+                    || phase === 'Combining' || phase === 'Completed';
+                const neuralDone = !!state?.neuralCompleted
+                    || phase === 'Combining' || phase === 'Completed';
+                const sourcesDone = phase !== 'LoadingSources' && phase !== 'Started' && phase !== 'Pending' && phase !== '';
+
+                let activeStep = 0;
+                if (sourcesDone) {
+                    activeStep = featuresDone ? (neuralDone ? 3 : 2) : 1;
+                }
+                if (phase === 'Combining') {
+                    activeStep = 3;
+                }
+                if (phase === 'Completed') {
+                    activeStep = 4;
+                }
+
                 const steps = document.querySelectorAll('#analysisStepper .analysis-step');
                 steps.forEach((el) => {
                     const idx = parseInt(el.getAttribute('data-step') || '0', 10);
-                    el.classList.toggle('is-active', idx === stepIndex);
-                    el.classList.toggle('is-done', idx < stepIndex);
+                    const done = idx === 0 ? sourcesDone
+                        : idx === 1 ? featuresDone
+                        : idx === 2 ? neuralDone
+                        : phase === 'Combining' || phase === 'Completed';
+                    el.classList.toggle('is-active', idx === activeStep && phase !== 'Completed');
+                    el.classList.toggle('is-done', done && idx !== activeStep);
                 });
             }
 
             function updateProgressUi(state) {
                 const phase = state?.phase ?? '';
-                const stepIndex = typeof state?.stepIndex === 'number'
-                    ? state.stepIndex
-                    : phase === 'LoadingSources' ? 0
-                    : phase === 'RunningAnalyzers' || phase === 'HeuristicReady' ? 1
-                    : phase === 'LlmReady' ? 2
-                    : phase === 'Combining' ? 3
-                    : phase === 'Completed' ? 4
-                    : 0;
-                updateStepper(Math.min(stepIndex, 3));
+                updateStepper(state);
 
                 const hasHeuristic = typeof state?.heuristicScore === 'number';
                 const hasLlm = typeof state?.llmScore === 'number';
@@ -375,9 +388,9 @@
                         : 'Ожидание…';
 
                 if (phase === 'HeuristicReady') {
-                    msg.textContent = 'Первичный (эвристический + Python) анализ уже готов. Нейросетевой этап продолжается…';
+                    msg.textContent = state?.message || 'Признаковый анализ завершён. Выполняется нейросетевой анализ…';
                 } else if (phase === 'LlmReady') {
-                    msg.textContent = 'Нейросетевой этап завершён. Формируется итоговый вывод…';
+                    msg.textContent = state?.message || 'Нейросетевой анализ завершён. Формируется итоговый вывод…';
                 } else if (state?.message) {
                     msg.textContent = state.message;
                 }
@@ -399,7 +412,7 @@
                 setUiLocked(true);
 
                 host.classList.remove('d-none');
-                updateStepper(0);
+                updateStepper({ phase: 'LoadingSources' });
                 msg.textContent = 'Отправка запроса…';
                 msg.classList.remove('text-danger');
                 hScore.textContent = 'Ожидание…';
