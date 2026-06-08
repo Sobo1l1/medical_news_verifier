@@ -14,6 +14,11 @@
     const cScore = document.getElementById('analysisCombinedScore');
     const modifiedBadge = document.getElementById('settingsModifiedBadge');
     const cancelBtn = document.getElementById('analysisCancelBtn');
+    const settingsOpenBtn = document.getElementById('analysisSettingsOpenBtn');
+    const settingsPanel = document.getElementById('analysisSettingsOffcanvas');
+    const settingsForm = document.getElementById('analysisSettingsForm');
+    const progressTitle = document.getElementById('analysisProgressTitle');
+    const progressSpinner = host?.querySelector('.spinner-border');
     const lockableButtons = Array.from(document.querySelectorAll('.js-analysis-lockable'));
     const lockableNav = Array.from(document.querySelectorAll('.js-analysis-lockable-nav, .navbar a, a.nav-link'));
     let analysisRunning = false;
@@ -196,6 +201,39 @@
             btn.disabled = isLocked;
             btn.setAttribute('aria-disabled', isLocked ? 'true' : 'false');
         });
+
+        if (settingsOpenBtn) {
+            if (isLocked) {
+                settingsOpenBtn.setAttribute('data-analysis-was-disabled', settingsOpenBtn.disabled ? '1' : '0');
+                settingsOpenBtn.disabled = true;
+                settingsOpenBtn.removeAttribute('data-bs-toggle');
+                settingsOpenBtn.removeAttribute('data-bs-target');
+                if (settingsPanel && typeof bootstrap !== 'undefined') {
+                    const inst = bootstrap.Offcanvas.getInstance(settingsPanel);
+                    inst?.hide();
+                }
+            } else {
+                const wasDisabled = settingsOpenBtn.getAttribute('data-analysis-was-disabled') === '1';
+                settingsOpenBtn.disabled = wasDisabled;
+                settingsOpenBtn.removeAttribute('data-analysis-was-disabled');
+                settingsOpenBtn.setAttribute('data-bs-toggle', 'offcanvas');
+                settingsOpenBtn.setAttribute('data-bs-target', '#analysisSettingsOffcanvas');
+            }
+        }
+
+        if (settingsForm) {
+            settingsForm.querySelectorAll('input, textarea, select, button').forEach((control) => {
+                if (isLocked) {
+                    control.setAttribute('data-analysis-was-disabled', control.disabled ? '1' : '0');
+                    control.disabled = true;
+                } else {
+                    const wasDisabled = control.getAttribute('data-analysis-was-disabled') === '1';
+                    control.disabled = wasDisabled;
+                    control.removeAttribute('data-analysis-was-disabled');
+                }
+            });
+        }
+
         if (form) {
             form.querySelectorAll('input, textarea, select, button').forEach((control) => {
                 if (isLocked) {
@@ -289,10 +327,21 @@
         cancelBtn?.classList.add('d-none');
     }
 
+    function resetProgressPanel() {
+        host?.classList.add('d-none');
+        if (progressTitle) progressTitle.textContent = 'Анализ выполняется…';
+        progressSpinner?.classList.remove('d-none');
+        document.querySelectorAll('#analysisStepper .analysis-step').forEach((el) => {
+            el.classList.remove('is-active', 'is-done');
+        });
+        document.getElementById('analysisResultSection')?.classList.remove('d-none');
+    }
+
     function finishAnalysisRun() {
         analysisRunning = false;
         stopPolling();
         setUiLocked(false);
+        resetProgressPanel();
     }
 
     async function requestCancel() {
@@ -303,7 +352,6 @@
             if (msg) msg.textContent = 'Прерывание анализа…';
         } catch {
             if (msg) msg.textContent = 'Не удалось отправить запрос на прерывание.';
-        } finally {
             cancelBtn.disabled = false;
         }
     }
@@ -311,10 +359,7 @@
     cancelBtn?.addEventListener('click', requestCancel);
 
     function hidePreviousResults() {
-        const section = document.getElementById('analysisResultSection');
-        if (section) {
-            section.classList.add('d-none');
-        }
+        document.getElementById('analysisResultSection')?.classList.add('d-none');
         host?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
@@ -374,8 +419,7 @@
                 } catch { /* ignore */ }
                 msg?.classList.add('text-danger');
                 if (msg) msg.textContent = 'Не удалось запустить анализ: ' + detail;
-                analysisRunning = false;
-                setUiLocked(false);
+                finishAnalysisRun();
                 return;
             }
 
@@ -384,8 +428,7 @@
             if (!jobId) {
                 msg?.classList.add('text-danger');
                 if (msg) msg.textContent = 'Сервер не вернул идентификатор задания.';
-                analysisRunning = false;
-                setUiLocked(false);
+                finishAnalysisRun();
                 return;
             }
             if (msg) msg.textContent = 'Анализ запущен, ожидайте этапы…';
@@ -396,6 +439,7 @@
                 const st = await fetch(statusUrl(jobId), { headers: { Accept: 'application/json' } });
                 if (!st.ok) {
                     finishAnalysisRun();
+                    msg?.classList.add('text-danger');
                     if (msg) msg.textContent = 'Статус анализа недоступен (HTTP ' + st.status + ').';
                     return;
                 }
@@ -404,13 +448,18 @@
                 if (s.phase === 'Completed') {
                     stopPolling();
                     analysisRunning = false;
-                    if (s.recordId) window.location.href = detailsUrl(s.recordId);
-                    else setUiLocked(false);
+                    if (s.recordId) {
+                        window.location.href = detailsUrl(s.recordId);
+                    } else {
+                        finishAnalysisRun();
+                    }
+                    return;
                 }
                 if (s.phase === 'Cancelled') {
                     finishAnalysisRun();
                     msg?.classList.remove('text-danger');
                     if (msg) msg.textContent = s.message || 'Анализ прерван.';
+                    return;
                 }
                 if (s.phase === 'Failed') {
                     finishAnalysisRun();

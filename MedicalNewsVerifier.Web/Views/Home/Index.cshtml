@@ -57,7 +57,7 @@
                 <span class="fw-semibold">Текст для проверки</span>
                 <div class="d-flex flex-wrap gap-2 align-items-center">
                     <span id="settingsModifiedBadge" class="badge bg-warning text-dark d-none">Настройки изменены</span>
-                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="offcanvas" data-bs-target="#analysisSettingsOffcanvas">
+                    <button type="button" id="analysisSettingsOpenBtn" class="btn btn-outline-secondary btn-sm js-analysis-lockable" data-bs-toggle="offcanvas" data-bs-target="#analysisSettingsOffcanvas">
                         <i class="bi bi-sliders"></i> Настройки
                     </button>
                 </div>
@@ -121,7 +121,7 @@
     var featureGroups = FeatureInsightGrouping.BuildGroups(Model.LastAnalysis.SuspiciousFragments);
 
     <div id="analysisResultSection" class="row mt-4 g-4">
-        <div class="col-lg-8">
+        <div id="analysisResultMain" class="col-lg-8">
             @if (Model.OpenedFromHistory)
             {
                 <div class="alert alert-info py-2">Просмотр сохранённой проверки из истории.</div>
