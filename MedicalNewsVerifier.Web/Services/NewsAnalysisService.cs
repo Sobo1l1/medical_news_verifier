@@ -131,10 +131,10 @@ public partial class NewsAnalysisService(
         {
             jobStore.Patch(jobId, s =>
             {
-                s.Phase = "Failed";
-                s.Error = "Операция отменена.";
+                s.Phase = "Cancelled";
+                s.Error = null;
+                s.Message = "Анализ прерван пользователем.";
             });
-            throw;
         }
         catch (Exception ex)
         {
@@ -214,6 +214,7 @@ public partial class NewsAnalysisService(
 
         while (pending.Count > 0)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var finished = await Task.WhenAny(pending);
             pending.Remove(finished);
 
@@ -362,7 +363,8 @@ public partial class NewsAnalysisService(
                 matches.Count,
                 lexical,
                 pythonOutcome,
-                runSettings),
+                runSettings,
+                fragments),
             SuspiciousFragments = fragments,
             OfficialPublicationMatches = matches.Select(match => new OfficialPublicationMatch
             {
@@ -683,7 +685,8 @@ public partial class NewsAnalysisService(
         int matchCount,
         LexicalFeatures lexical,
         PythonAnalysisOutcome pythonOutcome,
-        EffectiveAnalysisRunSettings runSettings)
+        EffectiveAnalysisRunSettings runSettings,
+        IReadOnlyList<SuspiciousFragment> mergedFragments)
     {
         var lines = new List<string>
         {
@@ -702,7 +705,7 @@ public partial class NewsAnalysisService(
             $"Верхний регистр (длинные токены): {lexical.UppercaseWords}; восклицательные знаки: {lexical.ExclamationCount}; вопросительные: {lexical.QuestionCount}.",
             $"Даты (цифровые и словесные): {(lexical.HasDates ? "есть" : "нет")}{(lexical.RussianDateHits > 0 ? $", из них словесных формулировок: {lexical.RussianDateHits}" : string.Empty)}.",
             $"Ссылки в тексте: {(lexical.HasLinks ? "есть" : "нет")}; числа: {(lexical.HasNumbers ? "есть" : "нет")}; явные отсылки к источнику: {(lexical.HasSourceCue ? "есть" : "нет")}.",
-            BuildPythonExplanationLine(pythonOutcome)
+            BuildPythonExplanationLine(pythonOutcome, mergedFragments)
         };
 
         var explanation = string.Join('\n', lines);
@@ -741,7 +744,7 @@ public partial class NewsAnalysisService(
         return $"Нейросеть (Ollama): не удалось получить оценку ({err}). Итог рассчитан по признаковому анализу.";
     }
 
-    private static string BuildPythonExplanationLine(PythonAnalysisOutcome o)
+    private static string BuildPythonExplanationLine(PythonAnalysisOutcome o, IReadOnlyList<SuspiciousFragment> mergedFragments)
     {
         if (o.Status != PythonAnalysisStatus.Ok)
         {
@@ -762,9 +765,15 @@ public partial class NewsAnalysisService(
         }
 
         var n = o.Fragments.Count;
+        var pythonHeuristicInMarkup = mergedFragments.Count(f => f.FeatureKind == SuspiciousFeatureKind.PythonHeuristic);
         if (n > 0)
         {
-            return $"Дополнительный модуль (Python): возвращено {n} фрагментов (словари RU/EN и правила в скрипте).";
+            if (pythonHeuristicInMarkup > 0)
+            {
+                return $"Дополнительный модуль (Python): {n} совпадений, в разметке — {pythonHeuristicInMarkup} доп. правил (regex/эвристики скрипта).";
+            }
+
+            return $"Дополнительный модуль (Python): {n} совпадений; пересечения со словарями приложения (C#) уже отражены в разметке.";
         }
 
         return "Дополнительный модуль (Python): выполнен успешно, дополнительных фрагментов не вернул; маркеры в тексте при этом могут полностью относиться к анализу приложения (C#).";
@@ -835,7 +844,7 @@ public partial class NewsAnalysisService(
             }
 
             var lemma = Lemmatize(cleaned);
-            if (lexicons.Emotional.Contains(lemma))
+            if (LexiconMatcher.Matches(lexicons.Emotional, lexicons.EmotionalRoot4, cleaned, lemma))
             {
                 emotionalHits++;
                 fragments.Add(new SuspiciousFragment
@@ -849,7 +858,7 @@ public partial class NewsAnalysisService(
                 });
             }
 
-            if (lexicons.Evaluative.Contains(lemma))
+            if (LexiconMatcher.Matches(lexicons.Evaluative, lexicons.EvaluativeRoot4, cleaned, lemma))
             {
                 evaluativeHits++;
                 fragments.Add(new SuspiciousFragment
@@ -1193,10 +1202,14 @@ public partial class NewsAnalysisService(
         var sourceCuesFile = configuration["AnalysisLexicons:SourceCuesFile"] ?? "source_cues_ru.txt";
 
         var cacheKey = string.Join('|', root, emotionalFile, manipulativeFile, evaluativeFile, sourceCuesFile);
+        var emotional = LoadEmotionalLexicons(root, emotionalFile);
+        var evaluative = ReadLexicon(Path.Combine(root, evaluativeFile));
         return LexiconCache.GetOrAdd(cacheKey, _ => new Lexicons(
-            LoadEmotionalLexicons(root, emotionalFile),
+            emotional,
+            LexiconMatcher.BuildRoot4Index(emotional),
             ReadLexicon(Path.Combine(root, manipulativeFile)),
-            ReadLexicon(Path.Combine(root, evaluativeFile)),
+            evaluative,
+            LexiconMatcher.BuildRoot4Index(evaluative),
             ReadLexicon(Path.Combine(root, sourceCuesFile))));
     }
 
@@ -1254,8 +1267,10 @@ public partial class NewsAnalysisService(
 
     private sealed record Lexicons(
         HashSet<string> Emotional,
+        HashSet<string> EmotionalRoot4,
         HashSet<string> Manipulative,
         HashSet<string> Evaluative,
+        HashSet<string> EvaluativeRoot4,
         HashSet<string> SourceCues);
 
     private sealed record LexicalFeatures(

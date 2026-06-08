@@ -13,14 +13,21 @@
     const lScore = document.getElementById('analysisLlmScore');
     const cScore = document.getElementById('analysisCombinedScore');
     const modifiedBadge = document.getElementById('settingsModifiedBadge');
+    const cancelBtn = document.getElementById('analysisCancelBtn');
     const lockableButtons = Array.from(document.querySelectorAll('.js-analysis-lockable'));
     const lockableNav = Array.from(document.querySelectorAll('.js-analysis-lockable-nav, .navbar a, a.nav-link'));
     let analysisRunning = false;
+    let activeJobId = null;
+    let pollTimer = null;
 
     function $(id) { return document.getElementById(id); }
 
     function statusUrl(jobId) {
         return cfg.statusUrlTemplate.replace(cfg.statusJobPlaceholder, jobId);
+    }
+
+    function cancelUrl(jobId) {
+        return cfg.cancelUrlTemplate.replace(cfg.cancelJobPlaceholder, jobId);
     }
 
     function detailsUrl(id) {
@@ -273,6 +280,44 @@
         });
     }
 
+    function stopPolling() {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+        activeJobId = null;
+        cancelBtn?.classList.add('d-none');
+    }
+
+    function finishAnalysisRun() {
+        analysisRunning = false;
+        stopPolling();
+        setUiLocked(false);
+    }
+
+    async function requestCancel() {
+        if (!activeJobId || !cfg.cancelUrlTemplate) return;
+        cancelBtn.disabled = true;
+        try {
+            await fetch(cancelUrl(activeJobId), { method: 'POST', headers: { Accept: 'application/json' } });
+            if (msg) msg.textContent = 'Прерывание анализа…';
+        } catch {
+            if (msg) msg.textContent = 'Не удалось отправить запрос на прерывание.';
+        } finally {
+            cancelBtn.disabled = false;
+        }
+    }
+
+    cancelBtn?.addEventListener('click', requestCancel);
+
+    function hidePreviousResults() {
+        const section = document.getElementById('analysisResultSection');
+        if (section) {
+            section.classList.add('d-none');
+        }
+        host?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
     function initAnalysisForm() {
         if (!form || !host || !cfg.startUrl) return;
 
@@ -289,6 +334,7 @@
                 return;
             }
             analysisRunning = true;
+            hidePreviousResults();
             setUiLocked(true);
             host.classList.remove('d-none');
             updateStepper({ phase: 'LoadingSources' });
@@ -343,29 +389,33 @@
                 return;
             }
             if (msg) msg.textContent = 'Анализ запущен, ожидайте этапы…';
+            activeJobId = jobId;
+            cancelBtn?.classList.remove('d-none');
 
-            const timer = setInterval(async function () {
+            pollTimer = setInterval(async function () {
                 const st = await fetch(statusUrl(jobId), { headers: { Accept: 'application/json' } });
                 if (!st.ok) {
-                    clearInterval(timer);
+                    finishAnalysisRun();
                     if (msg) msg.textContent = 'Статус анализа недоступен (HTTP ' + st.status + ').';
-                    analysisRunning = false;
-                    setUiLocked(false);
                     return;
                 }
                 const s = await st.json();
                 updateProgressUi(s);
                 if (s.phase === 'Completed') {
-                    clearInterval(timer);
+                    stopPolling();
                     analysisRunning = false;
                     if (s.recordId) window.location.href = detailsUrl(s.recordId);
                     else setUiLocked(false);
                 }
+                if (s.phase === 'Cancelled') {
+                    finishAnalysisRun();
+                    msg?.classList.remove('text-danger');
+                    if (msg) msg.textContent = s.message || 'Анализ прерван.';
+                }
                 if (s.phase === 'Failed') {
-                    clearInterval(timer);
+                    finishAnalysisRun();
+                    msg?.classList.add('text-danger');
                     if (msg) msg.textContent = 'Ошибка: ' + (s.error || 'неизвестно');
-                    analysisRunning = false;
-                    setUiLocked(false);
                 }
             }, 450);
         });

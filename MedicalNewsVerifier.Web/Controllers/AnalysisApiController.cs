@@ -11,6 +11,7 @@ namespace MedicalNewsVerifier.Web.Controllers;
 public sealed class AnalysisApiController(
     IServiceScopeFactory scopeFactory,
     IAnalysisJobStore jobStore,
+    IAnalysisJobCancellationRegistry jobCancellationRegistry,
     IAnalysisDefaultsService analysisDefaultsService,
     ILogger<AnalysisApiController> logger) : ControllerBase
 {
@@ -59,6 +60,7 @@ public sealed class AnalysisApiController(
 
         var jobId = Guid.NewGuid();
         jobStore.Create(jobId);
+        var cancellationToken = jobCancellationRegistry.Register(jobId);
 
         _ = Task.Run(async () =>
         {
@@ -66,7 +68,16 @@ public sealed class AnalysisApiController(
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var svc = scope.ServiceProvider.GetRequiredService<INewsAnalysisService>();
-                await svc.RunAnalysisJobAsync(jobId, input, CancellationToken.None);
+                await svc.RunAnalysisJobAsync(jobId, input, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                jobStore.Patch(jobId, s =>
+                {
+                    s.Phase = "Cancelled";
+                    s.Error = null;
+                    s.Message = "Анализ прерван пользователем.";
+                });
             }
             catch (Exception ex)
             {
@@ -77,9 +88,42 @@ public sealed class AnalysisApiController(
                     s.Error = ex.Message;
                 });
             }
+            finally
+            {
+                jobCancellationRegistry.Remove(jobId);
+            }
         });
 
         return Ok(new { jobId });
+    }
+
+    [HttpPost("{jobId:guid}/cancel")]
+    public IActionResult Cancel(Guid jobId)
+    {
+        var state = jobStore.TryGet(jobId);
+        if (state is null)
+        {
+            return NotFound(new { message = "Задание не найдено или уже завершено." });
+        }
+
+        if (state.Phase is "Completed" or "Failed" or "Cancelled")
+        {
+            return BadRequest(new { message = "Анализ уже завершён." });
+        }
+
+        if (!jobCancellationRegistry.TryCancel(jobId))
+        {
+            return NotFound(new { message = "Не удалось прервать задание." });
+        }
+
+        jobStore.Patch(jobId, s =>
+        {
+            s.Phase = "Cancelled";
+            s.Error = null;
+            s.Message = "Прерывание анализа…";
+        });
+
+        return Ok(new { message = "Запрос на прерывание отправлен." });
     }
 
     [HttpGet("{jobId:guid}/status")]

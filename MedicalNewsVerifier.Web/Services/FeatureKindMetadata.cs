@@ -78,4 +78,20 @@ public static class FeatureKindMetadata
         ("number", "Числа"),
         ("python", "Доп. признаки риска")
     ];
+
+    public static string PdfHighlightColor(SuspiciousFeatureKind kind) => kind switch
+    {
+        SuspiciousFeatureKind.Emotional => "#F8D7DA",
+        SuspiciousFeatureKind.Manipulative => "#E2D9F3",
+        SuspiciousFeatureKind.Evaluative => "#FFE5CC",
+        SuspiciousFeatureKind.UppercaseWord => "#F7D6E6",
+        SuspiciousFeatureKind.Exclamation => "#FFF3CD",
+        SuspiciousFeatureKind.Question => "#CFF4FC",
+        SuspiciousFeatureKind.Link => "#D1E7DD",
+        SuspiciousFeatureKind.Date => "#D1F2EB",
+        SuspiciousFeatureKind.Number => "#E2E3E5",
+        SuspiciousFeatureKind.SourceCue => "#D6E4FF",
+        SuspiciousFeatureKind.PythonHeuristic => "#E2E3E5",
+        _ => "#F8F9FA"
+    };
 }

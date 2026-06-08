@@ -121,6 +121,15 @@ public class PythonLinguisticClient(IConfiguration configuration, IWebHostEnviro
                 return new PythonAnalysisOutcome([], PythonAnalysisStatus.JsonError, process.ExitCode, TruncateStderr(error));
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
+            throw;
+        }
         catch (OperationCanceledException)
         {
             if (!process.HasExited)

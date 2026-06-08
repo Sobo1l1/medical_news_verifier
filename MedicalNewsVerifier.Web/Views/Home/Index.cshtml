@@ -24,6 +24,11 @@
                     <div class="analysis-step" data-step="3"><span class="step-dot"></span><span class="step-label">Сохранение</span></div>
                 </div>
                 <p class="small text-muted mb-2" id="analysisProgressMessage">Подготовка…</p>
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                    <button type="button" id="analysisCancelBtn" class="btn btn-sm btn-outline-danger d-none">
+                        <i class="bi bi-x-circle me-1"></i> Прервать анализ
+                    </button>
+                </div>
                 <div class="row g-2">
                     <div class="col-md-4">
                         <div class="score-pill">
@@ -115,7 +120,7 @@
 {
     var featureGroups = FeatureInsightGrouping.BuildGroups(Model.LastAnalysis.SuspiciousFragments);
 
-    <div class="row mt-4 g-4">
+    <div id="analysisResultSection" class="row mt-4 g-4">
         <div class="col-lg-8">
             @if (Model.OpenedFromHistory)
             {
@@ -157,10 +162,14 @@
                                 @foreach (var g in featureGroups)
                                 {
                                     var kinds = string.Join(",", g.KindValues);
-                                    <div class="feature-hint border rounded p-2 mb-2" data-feature-hints="@kinds">
-                                        <div class="fw-semibold">@g.Title</div>
+                                    var samples = FeatureInsightGrouping.FormatSampleExcerpts(g.Fragments);
+                                    <div class="feature-hint feature-hint-compact border rounded p-2 mb-2" data-feature-hints="@kinds">
+                                        <div class="fw-semibold small">@g.Title</div>
                                         <div class="small text-muted mt-1">@g.Description</div>
-                                        <div class="small mt-2">Найдено: <strong>@g.Fragments.Count</strong></div>
+                                        @if (!string.IsNullOrEmpty(samples))
+                                        {
+                                            <div class="small text-muted mt-1 feature-sample-excerpts">@samples</div>
+                                        }
                                     </div>
                                 }
                             }
@@ -187,6 +196,8 @@
         var analysisDefaultsUrl = Url.Action("Defaults", "AnalysisApi") ?? "";
         var statusJobPlaceholder = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var analysisStatusUrlTemplate = Url.Action("Status", "AnalysisApi", new { jobId = statusJobPlaceholder }) ?? "";
+        var cancelJobPlaceholder = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var analysisCancelUrlTemplate = Url.Action("Cancel", "AnalysisApi", new { jobId = cancelJobPlaceholder }) ?? "";
         const int detailsIdPlaceholder = 123456789;
         var detailsUrlTemplate = Url.Action("Details", "Home", new { id = detailsIdPlaceholder }) ?? "";
     }
@@ -195,8 +206,10 @@
             startUrl: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(analysisStartUrl)),
             defaultsUrl: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(analysisDefaultsUrl)),
             statusUrlTemplate: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(analysisStatusUrlTemplate)),
+            cancelUrlTemplate: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(analysisCancelUrlTemplate)),
             detailsUrlTemplate: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(detailsUrlTemplate)),
             statusJobPlaceholder: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(statusJobPlaceholder.ToString("D"))),
+            cancelJobPlaceholder: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(cancelJobPlaceholder.ToString("D"))),
             detailsIdPlaceholder: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(detailsIdPlaceholder.ToString(System.Globalization.CultureInfo.InvariantCulture)))
         };
     </script>

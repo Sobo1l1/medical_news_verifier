@@ -142,4 +142,48 @@ public static class TextMarkupBuilder
 
         return sb.ToString();
     }
+
+    public readonly record struct MarkupSegment(string Text, SuspiciousFeatureKind Kind);
+
+    /// <summary>Сегменты текста для PDF/HTML: обычный текст или фрагмент с типом маркера.</summary>
+    public static IReadOnlyList<MarkupSegment> BuildSegments(string fullText, IReadOnlyList<SuspiciousFragment> fragments)
+    {
+        if (string.IsNullOrEmpty(fullText))
+        {
+            return [];
+        }
+
+        var usable = DedupeNonOverlapping(fragments).Take(MaxFragmentsForHtml).OrderBy(x => x.StartOffset).ToList();
+        if (usable.Count == 0)
+        {
+            return [new MarkupSegment(fullText, SuspiciousFeatureKind.None)];
+        }
+
+        var segments = new List<MarkupSegment>();
+        var cursor = 0;
+        foreach (var f in usable)
+        {
+            if (f.StartOffset > fullText.Length)
+            {
+                break;
+            }
+
+            var start = Math.Clamp(f.StartOffset, 0, fullText.Length);
+            var end = Math.Clamp(f.EndOffset, start, fullText.Length);
+            if (start > cursor)
+            {
+                segments.Add(new MarkupSegment(fullText[cursor..start], SuspiciousFeatureKind.None));
+            }
+
+            segments.Add(new MarkupSegment(fullText[start..end], f.FeatureKind));
+            cursor = end;
+        }
+
+        if (cursor < fullText.Length)
+        {
+            segments.Add(new MarkupSegment(fullText[cursor..], SuspiciousFeatureKind.None));
+        }
+
+        return segments;
+    }
 }

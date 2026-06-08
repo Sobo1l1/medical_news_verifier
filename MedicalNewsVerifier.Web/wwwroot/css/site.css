@@ -304,6 +304,28 @@ table tbody tr:hover {
   box-shadow: none;
 }
 
+.feature-sample-excerpts {
+  line-height: 1.45;
+  opacity: 0.85;
+}
+
+.feature-hint-compact {
+  padding: 0.45rem 0.6rem !important;
+}
+
+.feature-hint-compact .feature-sample-excerpts {
+  font-size: 0.78rem;
+  margin-top: 0.25rem !important;
+}
+
+.sidebar-collapse-toggle .bi-chevron-down {
+  transition: transform 0.2s ease;
+}
+
+.sidebar-collapse-toggle.collapsed .bi-chevron-down {
+  transform: rotate(-90deg);
+}
+
 @media (max-width: 576px) {
   .analysis-stepper {
     flex-direction: column;

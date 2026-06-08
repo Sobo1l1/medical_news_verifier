@@ -120,15 +120,56 @@ public class AnalysisReportExporter : IAnalysisReportExporter
 
                         if (record.SuspiciousFragments.Count > 0)
                         {
-                            col.Item().PaddingTop(4).Text($"Выявленные признаки ({record.SuspiciousFragments.Count})").Bold();
-                            foreach (var fragment in record.SuspiciousFragments.Take(10))
+                            var doc = AnalyzedDocument.From(record.Headline, record.NewsText);
+                            var segments = TextMarkupBuilder.BuildSegments(doc.FullText, record.SuspiciousFragments);
+
+                            col.Item().PaddingTop(4).Text("Разметка текста").Bold().FontSize(13);
+
+                            col.Item().Text("Легенда:").FontSize(8).FontColor(Colors.Grey.Darken1);
+                            col.Item().Row(legend =>
                             {
-                                col.Item().Background(Colors.Yellow.Lighten5).BorderLeft(3).BorderColor(Colors.Orange.Medium)
-                                    .Padding(6).Column(f =>
+                                legend.Spacing(4);
+                                foreach (var sw in FeatureKindMetadata.LegendSwatches().Take(6))
+                                {
+                                    legend.AutoItem().Background("#E9ECEF").Padding(3).Text(sw.Label).FontSize(7);
+                                }
+                            });
+
+                            col.Item().Background(Colors.Grey.Lighten4).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(8)
+                                .Text(text =>
+                                {
+                                    text.DefaultTextStyle(x => x.FontSize(9).LineHeight(1.35f));
+                                    foreach (var seg in segments)
                                     {
-                                        f.Item().Text(FeatureKindMetadata.Title((SuspiciousFeatureKind)fragment.FeatureKindId)).Bold();
-                                        f.Item().Text(Truncate(fragment.Reason, 220)).FontSize(9);
-                                    });
+                                        if (string.IsNullOrEmpty(seg.Text))
+                                        {
+                                            continue;
+                                        }
+
+                                        if (seg.Kind == SuspiciousFeatureKind.None)
+                                        {
+                                            text.Span(seg.Text);
+                                        }
+                                        else
+                                        {
+                                            text.Span(seg.Text).BackgroundColor(FeatureKindMetadata.PdfHighlightColor(seg.Kind));
+                                        }
+                                    }
+                                });
+
+                            var groups = FeatureInsightGrouping.BuildGroups(record.SuspiciousFragments);
+                            col.Item().PaddingTop(4).Text("Сводка по типам маркеров").Bold().FontSize(10);
+                            foreach (var group in groups)
+                            {
+                                col.Item().PaddingTop(2).Column(g =>
+                                {
+                                    g.Item().Text(group.Title).Bold().FontSize(9);
+                                    var samples = FeatureInsightGrouping.FormatSampleExcerpts(group.Fragments);
+                                    if (!string.IsNullOrWhiteSpace(samples))
+                                    {
+                                        g.Item().Text(samples).FontSize(8).FontColor(Colors.Grey.Darken2);
+                                    }
+                                });
                             }
                         }
 

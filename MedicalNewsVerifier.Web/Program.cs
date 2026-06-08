@@ -17,6 +17,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IAnalysisJobStore, AnalysisJobStore>();
+builder.Services.AddSingleton<IAnalysisJobCancellationRegistry, AnalysisJobCancellationRegistry>();
 builder.Services.Configure<OllamaOptions>(builder.Configuration.GetSection("Ollama"));
 builder.Services.AddHttpClient<IOllamaComparisonClient, OllamaComparisonClient>((sp, http) =>
 {

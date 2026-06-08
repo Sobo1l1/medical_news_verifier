@@ -15,6 +15,26 @@ public sealed record FeatureInsightGroup(
 public static class FeatureInsightGrouping
 {
     public const string SourceRefsKey = "source-refs";
+    private const int DefaultSampleCount = 3;
+    private const int SampleMaxChars = 48;
+
+    /// <summary>До трёх коротких цитат из текста, разделённых « · ».</summary>
+    public static string FormatSampleExcerpts(IEnumerable<SuspiciousFragment> fragments, int maxSamples = DefaultSampleCount)
+    {
+        var samples = fragments
+            .Select(f => f.FragmentText?.Trim())
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(maxSamples)
+            .Select(TruncateSample)
+            .ToList();
+
+        return samples.Count == 0 ? string.Empty : string.Join(" · ", samples);
+    }
+
+    private static string TruncateSample(string text) =>
+        text.Length <= SampleMaxChars ? text : text[..(SampleMaxChars - 1)] + "…";
 
     public static IReadOnlyList<FeatureInsightGroup> BuildGroups(IEnumerable<SuspiciousFragment> fragments)
     {
@@ -30,7 +50,7 @@ public static class FeatureInsightGrouping
             result.Add(new FeatureInsightGroup(
                 SourceRefsKey,
                 [(int)SuspiciousFeatureKind.Link, (int)SuspiciousFeatureKind.SourceCue],
-                "Источники и ссылки в тексте",
+                $"Источники и ссылки в тексте ({sourceRefs.Count})",
                 "Гиперссылки и явные отсылки к ведомствам или формулировки вида «по данным …» повышают прозрачность и проверяемость.",
                 sourceRefs));
         }
@@ -43,7 +63,7 @@ public static class FeatureInsightGrouping
             result.Add(new FeatureInsightGroup(
                 $"kind-{(int)g.Key}",
                 [(int)g.Key],
-                FeatureKindMetadata.Title(g.Key),
+                $"{FeatureKindMetadata.Title(g.Key)} ({g.Count()})",
                 FeatureKindMetadata.Description(g.Key),
                 g.ToList()));
         }
