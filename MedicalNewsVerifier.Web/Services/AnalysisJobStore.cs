@@ -12,6 +12,8 @@ public interface IAnalysisJobStore
 public sealed class AnalysisJobState
 {
     public string Phase { get; set; } = "Pending";
+    /// <summary>0 — источники, 1 — эвристика, 2 — Ollama, 3 — сохранение.</summary>
+    public int StepIndex { get; set; }
     public string? Message { get; set; }
     public int? HeuristicScore { get; set; }
     public int? LlmScore { get; set; }

@@ -151,7 +151,14 @@
                                     _ => "Достоверна"
                                 };
 
-                                <tr>
+                                var rowClass = record.Status switch
+                                {
+                                    VerificationStatus.Suspicious => "table-danger",
+                                    VerificationStatus.NeedsReview => "table-warning",
+                                    _ => ""
+                                };
+
+                                <tr class="@rowClass">
                                     <td>
                                         <strong>
                                             @if (record.Headline.Length > 50)
@@ -180,6 +187,7 @@
                                         <a href="/Home/Details/@record.Id?fromHistory=true" class="btn btn-sm btn-outline-primary" title="Просмотреть детали">
                                             Просмотр
                                         </a>
+                                        <a href="/Home/ExportPdf/@record.Id" class="btn btn-sm btn-outline-secondary" title="PDF">PDF</a>
                                         <form method="post" action="/Home/Delete" style="display:inline;">
                                             @Html.AntiForgeryToken()
                                             <input type="hidden" name="id" value="@record.Id" />
@@ -204,27 +212,27 @@
                     @if (Model.PageNumber > 1)
                     {
                         <li class="page-item">
-                            <a class="page-link" href="?page=1&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">Первая</a>
+                            <a class="page-link" href="@Model.PaginationQuery(1)">Первая</a>
                         </li>
                         <li class="page-item">
-                            <a class="page-link" href="?page=@(Model.PageNumber - 1)&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">← Предыдущая</a>
+                            <a class="page-link" href="@Model.PaginationQuery(Model.PageNumber - 1)">← Предыдущая</a>
                         </li>
                     }
 
                     @for (int i = Math.Max(1, Model.PageNumber - 2); i <= Math.Min(Model.TotalPages, Model.PageNumber + 2); i++)
                     {
                         <li class="page-item @(i == Model.PageNumber ? "active" : "")">
-                            <a class="page-link" href="?page=@i&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">@i</a>
+                            <a class="page-link" href="@Model.PaginationQuery(i)">@i</a>
                         </li>
                     }
 
                     @if (Model.PageNumber < Model.TotalPages)
                     {
                         <li class="page-item">
-                            <a class="page-link" href="?page=@(Model.PageNumber + 1)&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">Следующая →</a>
+                            <a class="page-link" href="@Model.PaginationQuery(Model.PageNumber + 1)">Следующая →</a>
                         </li>
                         <li class="page-item">
-                            <a class="page-link" href="?page=@Model.TotalPages&search=@Uri.EscapeDataString(Model.SearchText ?? "")&status=@Model.StatusFilter&minScore=@Model.MinScore&maxScore=@Model.MaxScore&sortBy=@Model.SortBy">Последняя</a>
+                            <a class="page-link" href="@Model.PaginationQuery(Model.TotalPages)">Последняя</a>
                         </li>
                     }
                 </ul>

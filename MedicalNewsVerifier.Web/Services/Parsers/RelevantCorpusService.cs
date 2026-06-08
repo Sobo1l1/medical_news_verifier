@@ -177,12 +177,76 @@ public sealed class RelevantCorpusService(
             .Take(maxArticles)
             .ToList();
 
+        var maxScore = selected.Count > 0 ? selected.Max(c => c.Score) : 0;
+        var staleCorpus = selected.Count > 0
+            && selected.All(c => c.Parsed.PublishedAtUtc < DateTime.UtcNow.AddHours(-24));
+
+        if (selected.Count < maxArticles || maxScore < 28 || staleCorpus)
+        {
+            logger.LogInformation(
+                "Expanding corpus search: count={Count}, maxScore={MaxScore}, staleCorpus={Stale}",
+                selected.Count,
+                maxScore,
+                staleCorpus);
+
+            var expandedQuery = new SourceSearchQuery
+            {
+                Headline = query.Headline,
+                NewsText = query.NewsText,
+                MaxResults = maxArticles + 5,
+                MinRelevanceScore = Math.Max(8, query.MinRelevanceScore - 7)
+            };
+
+            foreach (var source in sources)
+            {
+                if (newsTopic == NewsTopic.Oncology
+                    && source.BaseUrl.Contains("rospotrebnadzor", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var parser = parserRegistry.FindParser(source);
+                if (parser is null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var parsed = await parser.SearchRelevantAsync(source, expandedQuery, cancellationToken);
+                    foreach (var pub in parsed)
+                    {
+                        var combined = $"{pub.Title} {pub.Content}";
+                        if (newsTopic == NewsTopic.Oncology && RelevanceScoring.IsPrimarilyRespiratory(combined))
+                        {
+                            continue;
+                        }
+
+                        var score = RelevanceScoring.CalculateMatchScore(headline, newsText, combined);
+                        candidates.Add((pub, source, score));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Expanded parser {ParserKey} failed for {SourceName}", parser.SourceKey, source.Name);
+                }
+            }
+
+            selected = candidates
+                .GroupBy(c => HtmlTextExtractor.NormalizeUrl(c.Parsed.Url), StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(x => x.Score).First())
+                .OrderByDescending(c => c.Score)
+                .ThenByDescending(c => RelevanceScoring.CandidateHasStatistics($"{c.Parsed.Title} {c.Parsed.Content}") ? 1 : 0)
+                .Take(maxArticles + 5)
+                .ToList();
+        }
+
         logger.LogInformation(
             "Relevant corpus: {Count} publication(s) selected for analysis (from {CandidateCount} candidates)",
             selected.Count,
             candidates.Count);
 
-        return selected.Select(c => new OfficialPublication
+        return selected.Take(maxArticles).Select(c => new OfficialPublication
         {
             TrustedSource = c.Source,
             TrustedSourceId = c.Source.Id,

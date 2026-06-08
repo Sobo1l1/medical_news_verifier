@@ -1,0 +1,85 @@
+@model DiagnosticsViewModel
+@{
+    ViewData["Title"] = "Статус системы";
+}
+
+<div class="container-fluid mt-4">
+    <h2 class="mb-4">Диагностика компонентов</h2>
+
+    <div class="row g-3">
+        <div class="col-md-4">
+            <div class="card h-100 border-@(Model.DatabaseOk ? "success" : "danger")">
+                <div class="card-body">
+                    <h5 class="card-title">PostgreSQL</h5>
+                    <p class="mb-0">
+                        @if (Model.DatabaseOk)
+                        {
+                            <span class="badge bg-success">Подключена</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-danger">Ошибка</span>
+                            <span class="small text-muted d-block mt-2">@Model.DatabaseError</span>
+                        }
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card h-100 border-@(!Model.OllamaEnabled ? "secondary" : Model.OllamaReachable ? "success" : "warning")">
+                <div class="card-body">
+                    <h5 class="card-title">Ollama</h5>
+                    @if (!Model.OllamaEnabled)
+                    {
+                        <span class="badge bg-secondary">Выключена в конфигурации</span>
+                    }
+                    else if (Model.OllamaReachable)
+                    {
+                        <span class="badge bg-success">Доступна</span>
+                        @if (!string.IsNullOrWhiteSpace(Model.OllamaModel))
+                        {
+                            <div class="small text-muted mt-2">Модель: @Model.OllamaModel</div>
+                        }
+                    }
+                    else
+                    {
+                        <span class="badge bg-warning text-dark">Недоступна</span>
+                        @if (!string.IsNullOrWhiteSpace(Model.OllamaError))
+                        {
+                            <div class="small text-muted mt-2">@Model.OllamaError</div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card h-100 border-@(Model.PythonAvailable ? "success" : "warning")">
+                <div class="card-body">
+                    <h5 class="card-title">Python</h5>
+                    @if (Model.PythonAvailable)
+                    {
+                        <span class="badge bg-success">Доступен</span>
+                        @if (!string.IsNullOrWhiteSpace(Model.PythonVersion))
+                        {
+                            <div class="small text-muted mt-2">@Model.PythonVersion</div>
+                        }
+                    }
+                    else
+                    {
+                        <span class="badge bg-warning text-dark">Недоступен</span>
+                        @if (!string.IsNullOrWhiteSpace(Model.PythonError))
+                        {
+                            <div class="small text-muted mt-2">@Model.PythonError</div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <a asp-action="Index" class="btn btn-outline-secondary">← К проверке новости</a>
+    </div>
+</div>

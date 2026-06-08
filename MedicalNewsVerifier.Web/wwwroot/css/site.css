@@ -131,3 +131,53 @@ body {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
   text-align: start;
 }
+
+.analysis-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.analysis-step {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
+}
+
+.analysis-step .step-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: #dee2e6;
+  flex-shrink: 0;
+}
+
+.analysis-step.is-active {
+  color: var(--bs-primary);
+  font-weight: 600;
+}
+
+.analysis-step.is-active .step-dot {
+  background: var(--bs-primary);
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25);
+}
+
+.analysis-step.is-done {
+  color: var(--bs-success);
+}
+
+.analysis-step.is-done .step-dot {
+  background: var(--bs-success);
+}
+
+.nav-link.active {
+  color: var(--bs-primary) !important;
+}
+
+@media (max-width: 576px) {
+  .analysis-stepper {
+    flex-direction: column;
+  }
+}

@@ -1,11 +1,19 @@
 ﻿@model MedicalNewsVerifier.Web.ViewModels.AnalyzeResultViewModel
 @{
     ViewData["Title"] = "Проверка новости";
+    var ollamaOn = Model.OllamaEnabled;
 }
 
 <div class="row">
     <div class="col-lg-10">
-        <h2 class="mb-3">Первичная проверка достоверности медицинской новости</h2>
+        <h2 class="mb-1">Первичная проверка достоверности медицинской новости</h2>
+        <p class="text-muted small mb-3">MedNews Verifier — проверка текстов медицинских новостей</p>
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <span class="badge @(ollamaOn ? "bg-success" : "bg-secondary")">
+                Ollama: @(ollamaOn ? "включена" : "выключена")
+            </span>
+            <a class="small" asp-controller="Home" asp-action="Diagnostics">Статус системы</a>
+        </div>
         <div class="alert alert-secondary">
             Анализ учитывает лексические, пунктуационные и структурные признаки (C#), дополнительный модуль Python,
             совпадения с корпусом доверенных материалов и параллельно — сравнение с тем же корпусом через локальную модель
@@ -16,6 +24,12 @@
                 <div class="d-flex align-items-center gap-2 mb-2">
                     <div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>
                     <strong id="analysisProgressTitle">Анализ выполняется…</strong>
+                </div>
+                <div class="analysis-stepper mb-3" id="analysisStepper">
+                    <div class="analysis-step" data-step="0"><span class="step-dot"></span><span class="step-label">Источники</span></div>
+                    <div class="analysis-step" data-step="1"><span class="step-dot"></span><span class="step-label">Эвристика</span></div>
+                    <div class="analysis-step" data-step="2"><span class="step-dot"></span><span class="step-label">Ollama</span></div>
+                    <div class="analysis-step" data-step="3"><span class="step-dot"></span><span class="step-label">Сохранение</span></div>
                 </div>
                 <p class="small text-muted mb-2" id="analysisProgressMessage">Подготовка…</p>
                 <div class="row g-2 small">
@@ -72,10 +86,6 @@
 
 @if (Model.LastAnalysis is not null)
 {
-    var scoreClass = Model.LastAnalysis.ReliabilityScore >= 70
-        ? "score-good"
-        : Model.LastAnalysis.ReliabilityScore <= 40 ? "score-bad" : "score-mid";
-
     var featureGroups = FeatureInsightGrouping.BuildGroups(Model.LastAnalysis.SuspiciousFragments);
     var explanationLines = Model.LastAnalysis.Explanation
         .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
@@ -83,75 +93,45 @@
 
     <div class="row mt-4">
         <div class="col-lg-10">
+            @if (Model.OpenedFromHistory)
+            {
+                <div class="alert alert-info py-2">
+                    Просмотр сохранённой проверки из истории: оценка, разметка и расшифровка признаков восстановлены из базы данных.
+                </div>
+            }
+            else if (Model.IsFromHistory)
+            {
+                <div class="alert alert-info py-2">
+                    Совпадающая проверка уже выполнялась ранее. Показан сохранённый результат и разметка из истории.
+                </div>
+            }
+
+            <partial name="_AnalysisVerdictCard" model="Model" />
+
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <a class="btn btn-sm btn-outline-danger" asp-action="ExportPdf" asp-route-id="@Model.LastAnalysis.Id">Скачать PDF</a>
+                <a class="btn btn-sm btn-outline-secondary" asp-action="ExportJson" asp-route-id="@Model.LastAnalysis.Id">Скачать JSON</a>
+            </div>
+
             <div class="card shadow-sm">
                 <div class="card-body">
-                    <h4 class="mb-3">Результат анализа</h4>
-
-                    @if (Model.OpenedFromHistory)
-                    {
-                        <div class="alert alert-info py-2">
-                            Просмотр сохранённой проверки из истории: оценка, разметка и расшифровка признаков восстановлены из базы данных.
-                        </div>
-                    }
-                    else if (Model.IsFromHistory)
-                    {
-                        <div class="alert alert-info py-2">
-                            Совпадающая проверка уже выполнялась ранее. Показан сохранённый результат и разметка из истории.
-                        </div>
-                    }
-                    <div class="d-flex flex-wrap align-items-baseline gap-2 mb-2">
-                        <span class="text-muted">Итоговая оценка</span>
-                        <span class="@scoreClass fs-4">@Model.LastAnalysis.ReliabilityScore/100</span>
-                    </div>
-                    <div class="row g-2 small mb-3">
+                    <h4 class="mb-3">Подробный результат</h4>
+                    <div class="mb-0">
+                        <div class="fw-semibold mb-2">Сводка автоматического анализа</div>
                         @{
-                            var heuristicShown = string.IsNullOrEmpty(Model.LastAnalysis.LlmSummary) && Model.LastAnalysis.HeuristicReliabilityScore == 0
-                                ? Model.LastAnalysis.ReliabilityScore
-                                : Model.LastAnalysis.HeuristicReliabilityScore;
-                            var llmHasResult = Model.LastAnalysis.LlmAlignmentScore.HasValue;
                             var llmHasSummary = !string.IsNullOrWhiteSpace(Model.LastAnalysis.LlmSummary);
-                            var llmStatusText = llmHasResult
-                                ? $"{Model.LastAnalysis.LlmAlignmentScore}/100"
-                                : llmHasSummary
-                                    ? "Ошибка"
-                                    : "—";
+                            var llmHasResult = Model.LastAnalysis.LlmAlignmentScore.HasValue;
                             var llmSummaryBlockClass = llmHasResult
                                 ? "ollama-summary-block"
                                 : "ollama-summary-block ollama-summary-block--warning";
                         }
-                        <div class="col-sm-4">
-                            <div class="border rounded p-2">
-                                <div class="text-muted">Эвристика</div>
-                                <div class="fw-semibold">@heuristicShown/100</div>
+                        @if (llmHasSummary)
+                        {
+                            <div class="@llmSummaryBlockClass small mb-3">
+                                <div class="fw-semibold mb-1">Краткое резюме модели (Ollama)</div>
+                                <div class="text-break mb-0">@Model.LastAnalysis.LlmSummary</div>
                             </div>
-                        </div>
-                        <div class="col-sm-4">
-                            <div class="border rounded p-2">
-                                <div class="text-muted" title="Согласованность с корпусом и медицинским консенсусом">Ollama (достоверность)</div>
-                                <div class="fw-semibold">@llmStatusText</div>
-                            </div>
-                        </div>
-                        <div class="col-sm-4">
-                            <div class="border rounded p-2">
-                                <div class="text-muted">Итог</div>
-                                <div class="fw-semibold">@Model.LastAnalysis.ReliabilityScore/100</div>
-                            </div>
-                        </div>
-                    </div>
-                    @if (llmHasSummary)
-                    {
-                        <div class="@llmSummaryBlockClass small mb-3">
-                            <div class="fw-semibold mb-1">Краткое резюме модели (Ollama)</div>
-                            <div class="text-break mb-0">@Model.LastAnalysis.LlmSummary</div>
-                        </div>
-                    }
-                    <div class="mb-3">
-                        <div class="fw-semibold">Статус</div>
-                        <div>@VerificationStatusRussian.Title(Model.LastAnalysis.Status)</div>
-                        <div class="small text-muted mt-1">@VerificationStatusRussian.Hint(Model.LastAnalysis.Status)</div>
-                    </div>
-                    <div class="mb-0">
-                        <div class="fw-semibold mb-2">Сводка автоматического анализа</div>
+                        }
                         @if (explanationLines.Count == 0)
                         {
                             <p class="text-muted small mb-0">Пояснение отсутствует.</p>
@@ -245,19 +225,28 @@
                     <h5>Релевантные официальные публикации</h5>
                     @if (Model.OfficialMatches.Count == 0)
                     {
-                        <p class="text-muted mb-0">Совпадения с официальными источниками не найдены.</p>
+                        <div class="alert alert-light border small mb-0">
+                            <p class="mb-2">Совпадения с официальными источниками не найдены. Чтобы улучшить проверку:</p>
+                            <ul class="mb-0">
+                                <li>Укажите полные URL официальных источников в тексте новости (с префиксом <code>https://</code>).</li>
+                                <li>Добавьте ключевые слова темы (онкология, ОРВИ, статистика и т.д.).</li>
+                                <li>Проверьте, что в разделе «Корпус» есть материалы по вашей теме.</li>
+                            </ul>
+                        </div>
                     }
                     else
                     {
                         <ul class="list-group">
                             @foreach (var source in Model.OfficialMatches)
                             {
+                                var relClass = source.RelevanceScore >= 40 ? "success" : source.RelevanceScore >= 22 ? "warning" : "secondary";
                                 <li class="list-group-item d-flex justify-content-between align-items-center">
                                     <div>
                                         <div><strong>@source.SourceName</strong>: @source.Title</div>
                                         <a href="@source.Url" target="_blank" rel="noopener">@source.Url</a>
                                     </div>
-                                    <span class="badge bg-secondary">релевантность @source.RelevanceScore%</span>
+                                    <span class="badge bg-@relClass"
+                                          title="Совпадение по ключевым словам и теме новости">@source.RelevanceScore%</span>
                                 </li>
                             }
                         </ul>
@@ -346,8 +335,27 @@
                 });
             }
 
+            function updateStepper(stepIndex) {
+                const steps = document.querySelectorAll('#analysisStepper .analysis-step');
+                steps.forEach((el) => {
+                    const idx = parseInt(el.getAttribute('data-step') || '0', 10);
+                    el.classList.toggle('is-active', idx === stepIndex);
+                    el.classList.toggle('is-done', idx < stepIndex);
+                });
+            }
+
             function updateProgressUi(state) {
                 const phase = state?.phase ?? '';
+                const stepIndex = typeof state?.stepIndex === 'number'
+                    ? state.stepIndex
+                    : phase === 'LoadingSources' ? 0
+                    : phase === 'RunningAnalyzers' || phase === 'HeuristicReady' ? 1
+                    : phase === 'LlmReady' ? 2
+                    : phase === 'Combining' ? 3
+                    : phase === 'Completed' ? 4
+                    : 0;
+                updateStepper(Math.min(stepIndex, 3));
+
                 const hasHeuristic = typeof state?.heuristicScore === 'number';
                 const hasLlm = typeof state?.llmScore === 'number';
                 const hasCombined = typeof state?.combinedScore === 'number';
@@ -391,6 +399,7 @@
                 setUiLocked(true);
 
                 host.classList.remove('d-none');
+                updateStepper(0);
                 msg.textContent = 'Отправка запроса…';
                 msg.classList.remove('text-danger');
                 hScore.textContent = 'Ожидание…';

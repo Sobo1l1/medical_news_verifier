@@ -38,8 +38,8 @@ public class AnalysisRecord
     [NotMapped]
     public VerificationStatus ComputedStatus => ReliabilityScore switch
     {
-        >= 70 => VerificationStatus.LikelyReliable,
-        <= 40 => VerificationStatus.Suspicious,
+        >= ReliabilityThresholds.ReliableMin => VerificationStatus.LikelyReliable,
+        <= ReliabilityThresholds.SuspiciousMax => VerificationStatus.Suspicious,
         _ => VerificationStatus.NeedsReview
     };
 

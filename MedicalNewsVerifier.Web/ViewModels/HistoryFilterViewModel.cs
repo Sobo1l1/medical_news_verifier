@@ -27,4 +27,45 @@ public class HistoryFilterViewModel
     public int NeedsReviewCount { get; set; }
     public int LikelyReliableCount { get; set; }
     public double AverageScore { get; set; }
+
+    public string PaginationQuery(int page)
+    {
+        var parts = new List<string> { $"page={page}" };
+        if (!string.IsNullOrWhiteSpace(SearchText))
+        {
+            parts.Add($"search={Uri.EscapeDataString(SearchText)}");
+        }
+
+        if (StatusFilter.HasValue)
+        {
+            parts.Add($"status={(int)StatusFilter.Value}");
+        }
+
+        if (MinScore.HasValue)
+        {
+            parts.Add($"minScore={MinScore.Value}");
+        }
+
+        if (MaxScore.HasValue)
+        {
+            parts.Add($"maxScore={MaxScore.Value}");
+        }
+
+        if (DateFrom.HasValue)
+        {
+            parts.Add($"dateFrom={DateFrom.Value:yyyy-MM-dd}");
+        }
+
+        if (DateTo.HasValue)
+        {
+            parts.Add($"dateTo={DateTo.Value:yyyy-MM-dd}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(SortBy))
+        {
+            parts.Add($"sortBy={Uri.EscapeDataString(SortBy)}");
+        }
+
+        return "?" + string.Join("&", parts);
+    }
 }

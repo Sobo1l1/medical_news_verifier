@@ -61,6 +61,7 @@ public partial class NewsAnalysisService(
             jobStore.Patch(jobId, s =>
             {
                 s.Phase = "LoadingSources";
+                s.StepIndex = 0;
                 s.Message = "Поиск релевантных материалов в официальных источниках…";
             });
 
@@ -91,6 +92,7 @@ public partial class NewsAnalysisService(
             jobStore.Patch(jobId, s =>
             {
                 s.Phase = "RunningAnalyzers";
+                s.StepIndex = 1;
                 s.Message = "Параллельно выполняются эвристический модуль (Python) и сравнение с корпусом через Ollama…";
             });
 
@@ -203,6 +205,7 @@ public partial class NewsAnalysisService(
                     jobStore.Patch(jobId.Value, s =>
                     {
                         s.Phase = "HeuristicReady";
+                        s.StepIndex = 1;
                         s.HeuristicScore = heuristicScore;
                         s.Message = "Эвристический и Python-анализ завершены. Формируем итог с учётом нейросети…";
                     });
@@ -216,6 +219,7 @@ public partial class NewsAnalysisService(
                     jobStore.Patch(jobId.Value, s =>
                     {
                         s.Phase = "LlmReady";
+                        s.StepIndex = 2;
                         s.LlmScore = llmOutcome.Succeeded ? llmOutcome.AlignmentScore : null;
                         s.LlmSummaryPreview = llmOutcome.Succeeded
                             ? TruncateForJob(llmOutcome.Summary)
@@ -263,6 +267,7 @@ public partial class NewsAnalysisService(
             jobStore.Patch(jobId.Value, s =>
             {
                 s.Phase = "Combining";
+                s.StepIndex = 3;
                 s.CombinedScore = combinedScore;
                 s.Message = "Сохранение результата…";
             });
@@ -459,22 +464,26 @@ public partial class NewsAnalysisService(
 
     private async Task<List<OfficialPublicationMatchVm>> GetStoredMatchesAsync(
         int analysisRecordId,
-        CancellationToken cancellationToken) =>
-        await db.OfficialPublicationMatches
+        CancellationToken cancellationToken)
+    {
+        var rows = await db.OfficialPublicationMatches
             .AsNoTracking()
             .Include(m => m.OfficialPublication!)
             .ThenInclude(p => p.TrustedSource)
             .Where(m => m.AnalysisRecordId == analysisRecordId)
             .OrderByDescending(m => m.RelevanceScore)
-            .Select(m => new OfficialPublicationMatchVm
-            {
-                OfficialPublicationId = m.OfficialPublicationId,
-                SourceName = m.OfficialPublication!.TrustedSource!.Name,
-                Title = m.OfficialPublication.Title,
-                Url = m.OfficialPublication.Url,
-                RelevanceScore = m.RelevanceScore
-            })
             .ToListAsync(cancellationToken);
+
+        return rows.Select(m => new OfficialPublicationMatchVm
+        {
+            OfficialPublicationId = m.OfficialPublicationId,
+            SourceName = m.OfficialPublication!.TrustedSource!.Name,
+            Title = m.OfficialPublication.Title,
+            Url = m.OfficialPublication.Url,
+            RelevanceScore = m.RelevanceScore,
+            HasStatistics = RelevanceScoring.CandidateHasStatistics($"{m.OfficialPublication.Title} {m.OfficialPublication.Content}")
+        }).ToList();
+    }
 
     private static List<OfficialPublication> SelectCorpusForLlm(
         string headline,
@@ -514,7 +523,8 @@ public partial class NewsAnalysisService(
                 SourceName = o.SourceName,
                 Title = o.Title,
                 Url = o.Url,
-                RelevanceScore = CalculateRelevance(headline, newsText, o.Content)
+                RelevanceScore = CalculateRelevance(headline, newsText, o.Content),
+                HasStatistics = RelevanceScoring.CandidateHasStatistics($"{o.Title} {o.Content}")
             })
             .Where(m => m.RelevanceScore >= minScore)
             .OrderByDescending(m => m.RelevanceScore)

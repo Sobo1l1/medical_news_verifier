@@ -17,6 +17,8 @@ public class AnalyzeResultViewModel
 
     /// <summary>HTML с экранированием и тегами mark для подсветки.</summary>
     public string? HighlightedHtml { get; set; }
+
+    public bool OllamaEnabled { get; set; }
 }
 
 public class OfficialPublicationMatchVm
@@ -26,4 +28,5 @@ public class OfficialPublicationMatchVm
     public string Title { get; set; } = string.Empty;
     public string Url { get; set; } = string.Empty;
     public int RelevanceScore { get; set; }
+    public bool HasStatistics { get; set; }
 }
