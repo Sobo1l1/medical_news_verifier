@@ -1,0 +1,55 @@
+@model MedicalNewsVerifier.Web.ViewModels.AnalyzeResultViewModel
+
+<div class="analysis-result-sidebar vstack gap-3">
+    <div class="app-card">
+        <div class="app-card-header fw-semibold"><i class="bi bi-download me-1"></i> Экспорт</div>
+        <div class="app-card-body d-grid gap-2">
+            <a class="btn btn-outline-danger" asp-action="ExportPdf" asp-route-id="@Model.LastAnalysis!.Id">
+                <i class="bi bi-file-pdf me-1"></i> Скачать PDF
+            </a>
+            <a class="btn btn-outline-secondary" asp-action="ExportJson" asp-route-id="@Model.LastAnalysis.Id">
+                <i class="bi bi-filetype-json me-1"></i> Скачать JSON
+            </a>
+        </div>
+    </div>
+
+    <div class="app-card">
+        <div class="app-card-header fw-semibold"><i class="bi bi-journal-text me-1"></i> Релевантные источники</div>
+        <div class="app-card-body">
+            @if (Model.OfficialMatches.Count == 0)
+            {
+                <p class="small text-muted mb-0">Совпадения не найдены. Добавьте полные URL (<code>https://</code>) в текст новости.</p>
+            }
+            else
+            {
+                <ul class="list-unstyled mb-0 source-sidebar-list">
+                    @foreach (var source in Model.OfficialMatches)
+                    {
+                        <li class="source-sidebar-item mb-3 pb-3 border-bottom border-light">
+                            <div class="d-flex justify-content-between align-items-start gap-2 mb-1">
+                                <span class="fw-semibold small">@source.SourceName</span>
+                                <span class="badge bg-@source.RelevanceBadgeClass flex-shrink-0">@source.RelevanceLabel</span>
+                            </div>
+                            <div class="small mb-1">@source.Title</div>
+                            <a href="@source.Url" target="_blank" rel="noopener" class="small text-break">@source.Url</a>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+
+    <div class="app-card">
+        <div class="app-card-header fw-semibold"><i class="bi bi-arrow-repeat me-1"></i> Дальнейшие действия</div>
+        <div class="app-card-body d-grid gap-2">
+            <button type="submit" form="newsAnalyzeForm" id="newsAnalyzeStartAgain" class="btn btn-primary js-analysis-lockable" name="forceNew" value="false">
+                <i class="bi bi-play-fill me-1"></i> Запустить анализ
+            </button>
+            <button type="submit" form="newsAnalyzeForm" id="newsAnalyzeForceNew" class="btn btn-outline-primary js-analysis-lockable" name="forceNew" value="true">
+                Снова*
+            </button>
+            <a class="btn btn-outline-secondary js-analysis-lockable-nav" asp-controller="Home" asp-action="Index">Новая проверка</a>
+            <p class="form-text mb-0 small">* Новая запись в истории, даже если текст совпадает с уже сохранённой проверкой.</p>
+        </div>
+    </div>
+</div>

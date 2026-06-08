@@ -265,6 +265,45 @@ table tbody tr:hover {
   background-color: rgba(37, 99, 235, 0.04);
 }
 
+.verdict-card.border-success { border-color: rgba(25, 135, 84, 0.4) !important; }
+.verdict-card.border-danger { border-color: rgba(220, 53, 69, 0.4) !important; }
+.verdict-card.border-warning { border-color: rgba(255, 193, 7, 0.5) !important; }
+
+@media (min-width: 992px) {
+  .analysis-result-sidebar {
+    position: sticky;
+    top: 1rem;
+    align-self: flex-start;
+  }
+}
+
+.explanation-summary-item:last-child {
+  border-bottom: none !important;
+}
+
+.explanation-tech {
+  font-size: 0.8rem;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.source-sidebar-list .source-sidebar-item:last-child {
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+  border-bottom: none !important;
+}
+
+#explanationTechAccordion .accordion-button {
+  font-size: 0.875rem;
+  background: #fafbfc;
+}
+
+#explanationTechAccordion .accordion-button:not(.collapsed) {
+  background: var(--app-primary-soft);
+  color: var(--app-primary);
+  box-shadow: none;
+}
+
 @media (max-width: 576px) {
   .analysis-stepper {
     flex-direction: column;

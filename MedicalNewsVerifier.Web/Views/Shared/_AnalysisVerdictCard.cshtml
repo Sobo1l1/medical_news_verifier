@@ -12,9 +12,9 @@
         || (record.LlmAlignmentScore.HasValue && record.LlmAlignmentScore < 25);
 }
 
-<div class="card shadow-sm mb-3 border-@badgeClass">
-    <div class="card-body">
-        <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+<div class="app-card mb-3 border-@badgeClass verdict-card">
+    <div class="app-card-body">
+        <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
             <span class="badge bg-@badgeClass fs-6 px-3 py-2">@statusLabel</span>
             <div>
                 <span class="text-muted small">Итог</span>
@@ -28,7 +28,7 @@
 
         @if (corpusWeak)
         {
-            <div class="alert alert-warning py-2 small mb-3">
+            <div class="alert alert-warning py-2 small mb-0">
                 <strong>Согласованность с корпусом ограничена.</strong>
                 @if (Model.OfficialMatches.Count == 0)
                 {
@@ -38,22 +38,6 @@
                 {
                     <span> Найденные материалы слабо связаны с темой; оценка нейросети опирается на общий контекст.</span>
                 }
-            </div>
-        }
-
-        @if (Model.OfficialMatches.Count > 0)
-        {
-            <div class="small">
-                <div class="fw-semibold mb-1">Источники, использованные при проверке (@Model.OfficialMatches.Count)</div>
-                <ul class="list-unstyled mb-0">
-                    @foreach (var m in Model.OfficialMatches)
-                    {
-                        <li class="mb-1">
-                            <span class="badge bg-@m.RelevanceBadgeClass me-1">@m.RelevanceLabel</span>
-                            @m.SourceName — @m.Title
-                        </li>
-                    }
-                </ul>
             </div>
         }
     </div>

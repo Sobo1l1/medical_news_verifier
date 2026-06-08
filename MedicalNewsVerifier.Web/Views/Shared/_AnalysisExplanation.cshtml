@@ -1,0 +1,62 @@
+@model MedicalNewsVerifier.Web.ViewModels.AnalyzeResultViewModel
+@{
+    var record = Model.LastAnalysis!;
+    var display = ExplanationPresenter.Parse(record.Explanation, record.LlmSummary);
+    var llmHasSummary = !string.IsNullOrWhiteSpace(record.LlmSummary);
+    var llmHasResult = record.LlmAlignmentScore.HasValue;
+    var llmSummaryBlockClass = llmHasResult ? "ollama-summary-block" : "ollama-summary-block ollama-summary-block--warning";
+}
+
+<div class="app-card mb-3">
+    <div class="app-card-header fw-semibold">Подробный результат</div>
+    <div class="app-card-body">
+        @if (llmHasSummary)
+        {
+            <div class="@llmSummaryBlockClass small mb-3">
+                <div class="fw-semibold mb-1">Краткое резюме (@AnalysisUiLabels.NeuralAnalysis)</div>
+                <div class="text-break mb-0">@record.LlmSummary</div>
+            </div>
+        }
+
+        @if (display.SummaryLines.Count == 0 && display.TechnicalLines.Count == 0)
+        {
+            <p class="text-muted small mb-0">Пояснение отсутствует.</p>
+        }
+        else if (display.SummaryLines.Count > 0)
+        {
+            <div class="fw-semibold small mb-2">Что показал анализ</div>
+            <ul class="list-unstyled explanation-summary mb-0">
+                @foreach (var item in display.SummaryLines)
+                {
+                    <li class="explanation-summary-item d-flex gap-2 py-2 border-bottom border-light small">
+                        <i class="bi @item.IconClass flex-shrink-0 mt-1"></i>
+                        <span class="text-break">@item.Text</span>
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (display.TechnicalLines.Count > 0)
+        {
+            <div class="accordion accordion-flush mt-3" id="explanationTechAccordion">
+                <div class="accordion-item border rounded">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed py-2 small" type="button" data-bs-toggle="collapse" data-bs-target="#explanationTechCollapse">
+                            Технические детали
+                        </button>
+                    </h2>
+                    <div id="explanationTechCollapse" class="accordion-collapse collapse" data-bs-parent="#explanationTechAccordion">
+                        <div class="accordion-body explanation-tech py-2">
+                            <ul class="list-unstyled mb-0">
+                                @foreach (var line in display.TechnicalLines)
+                                {
+                                    <li class="mb-1 text-break">@line</li>
+                                }
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>

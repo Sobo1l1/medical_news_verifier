@@ -47,11 +47,6 @@
             </div>
         </div>
 
-        @if (Model.LastAnalysis is not null)
-        {
-            <partial name="_AnalyzeFollowUpActions" model="false" />
-        }
-
         <div class="app-card">
             <div class="app-card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
                 <span class="fw-semibold">Текст для проверки</span>
@@ -94,7 +89,7 @@
                 <h6 class="fw-semibold mb-2"><i class="bi bi-info-circle me-1"></i> Как работает проверка</h6>
                 <ol class="small text-muted ps-3 mb-0">
                     <li class="mb-1">Поиск релевантных материалов в официальных источниках</li>
-                    <li class="mb-1">@AnalysisUiLabels.FeatureAnalysis (C# + Python)</li>
+                    <li class="mb-1">@AnalysisUiLabels.FeatureAnalysis — лексика и правила</li>
                     <li class="mb-1">@AnalysisUiLabels.NeuralAnalysis — сравнение с корпусом</li>
                     <li>Итоговая оценка и разметка текста</li>
                 </ol>
@@ -119,12 +114,9 @@
 @if (Model.LastAnalysis is not null)
 {
     var featureGroups = FeatureInsightGrouping.BuildGroups(Model.LastAnalysis.SuspiciousFragments);
-    var explanationLines = Model.LastAnalysis.Explanation
-        .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-        .ToList();
 
     <div class="row mt-4 g-4">
-        <div class="col-12">
+        <div class="col-lg-8">
             @if (Model.OpenedFromHistory)
             {
                 <div class="alert alert-info py-2">Просмотр сохранённой проверки из истории.</div>
@@ -135,45 +127,7 @@
             }
 
             <partial name="_AnalysisVerdictCard" model="Model" />
-
-            <div class="d-flex flex-wrap gap-2 mb-3">
-                <a class="btn btn-sm btn-outline-danger" asp-action="ExportPdf" asp-route-id="@Model.LastAnalysis.Id"><i class="bi bi-file-pdf me-1"></i>PDF</a>
-                <a class="btn btn-sm btn-outline-secondary" asp-action="ExportJson" asp-route-id="@Model.LastAnalysis.Id"><i class="bi bi-filetype-json me-1"></i>JSON</a>
-            </div>
-
-            <div class="app-card mb-3">
-                <div class="app-card-header fw-semibold">Подробный результат</div>
-                <div class="app-card-body">
-                    @{
-                        var llmHasSummary = !string.IsNullOrWhiteSpace(Model.LastAnalysis.LlmSummary);
-                        var llmHasResult = Model.LastAnalysis.LlmAlignmentScore.HasValue;
-                        var llmSummaryBlockClass = llmHasResult ? "ollama-summary-block" : "ollama-summary-block ollama-summary-block--warning";
-                    }
-                    @if (llmHasSummary)
-                    {
-                        <div class="@llmSummaryBlockClass small mb-3">
-                            <div class="fw-semibold mb-1">Краткое резюме (@AnalysisUiLabels.NeuralAnalysis)</div>
-                            <div class="text-break mb-0">@Model.LastAnalysis.LlmSummary</div>
-                        </div>
-                    }
-                    @if (explanationLines.Count == 0)
-                    {
-                        <p class="text-muted small mb-0">Пояснение отсутствует.</p>
-                    }
-                    else
-                    {
-                        <ul class="list-unstyled analysis-summary mb-0">
-                            @foreach (var line in explanationLines)
-                            {
-                                <li class="d-flex gap-3 px-3 py-2 border-bottom border-light small">
-                                    <span class="text-secondary flex-shrink-0">—</span>
-                                    <span class="text-break">@line</span>
-                                </li>
-                            }
-                        </ul>
-                    }
-                </div>
-            </div>
+            <partial name="_AnalysisExplanation" model="Model" />
 
             <div class="app-card mb-3">
                 <div class="app-card-header fw-semibold">Разметка текста</div>
@@ -214,35 +168,10 @@
                     </div>
                 </div>
             </div>
+        </div>
 
-            <div class="app-card mb-3">
-                <div class="app-card-header fw-semibold">Релевантные официальные публикации</div>
-                <div class="app-card-body">
-                    @if (Model.OfficialMatches.Count == 0)
-                    {
-                        <div class="alert alert-light border small mb-0">
-                            <p class="mb-2">Совпадения не найдены. Добавьте URL источников (<code>https://</code>) в текст новости.</p>
-                        </div>
-                    }
-                    else
-                    {
-                        <ul class="list-group list-group-flush">
-                            @foreach (var source in Model.OfficialMatches)
-                            {
-                                <li class="list-group-item px-0 d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <div><strong>@source.SourceName</strong>: @source.Title</div>
-                                        <a href="@source.Url" target="_blank" rel="noopener" class="small">@source.Url</a>
-                                    </div>
-                                    <span class="badge bg-@source.RelevanceBadgeClass">@source.RelevanceLabel (@source.RelevanceScore%)</span>
-                                </li>
-                            }
-                        </ul>
-                    }
-                </div>
-            </div>
-
-            <partial name="_AnalyzeFollowUpActions" model="true" />
+        <div class="col-lg-4">
+            <partial name="_AnalysisResultSidebar" model="Model" />
         </div>
     </div>
 }
